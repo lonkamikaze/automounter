@@ -1,0 +1,277 @@
+#!/bin/sh
+#
+# Copyright (c) 2006-2009
+# Dominic Fandrey <kamikaze@bsdforen.de>
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+readonly name=portconfig
+readonly version=1.9.1
+
+# Use the script call as a command given to the selected startscript.
+# Several commands can be realized with symlinks to this script,
+# such as fetch, configure, package and so on. All with the prefix 'port'.
+command="${0##*port}"
+
+# Global settings.
+verbose=
+retries=0
+
+# Display help.
+printHelp() {
+	echo "$name ($command) v$version
+usage:	port$command [-v] [-a] [-f] [-r] [-R] [-h] [-tN] [ports]"
+}
+
+#
+# Handle parameters.
+#
+# @param 1
+#	The parameter to handle.
+# @param verbose
+#	Is set to create verbose output.
+# @param all
+#	Is set to perform $command on all installed ports.
+# @param force
+#	Is set to perform $command on up-to-date ports and not yet installed
+#	ports.
+# @param recursive
+#	Is set to perform $command recursively.
+#	For historical reasons this mimics the behaviour of portupgrade, which
+#	is the opposite of pkg_info.
+# @param upwardrecursive
+#	Is set to perform $command upward recursive.
+#	For historical reasons this mimics the behaviour of portupgrade, which
+#	is the opposite of pkg_info.
+# @param retries
+#	Is set to retry $command if it fails.
+# @param ports
+#	Ports to run $command on are appended to this list.
+# @return
+#	Returns 0 (true) for successful processing of a parameter.
+#	There is a 1 (false) fallback that will never be reached.
+# @exit 1
+#	Exits with 1 if an unknown parameter is encountered.
+#
+readParams() {
+	case "$1" in
+		"-v" | "--verbose")
+			verbose=1
+			return 0
+		;;
+		"-a" | "--all")
+			all=1
+			return 0
+		;;
+		"-f" | "--force")
+			force=1
+			return 0
+		;;
+		"-r" | "--recursive")
+			recursive=1
+			return 0
+		;;
+		"-R" | "--upward-recursive")
+			upwardrecursive=1
+			return 0
+		;;
+		-t* | --try-again*)
+			retries=$(echo "$1" | sed 's|[^0-9]*||g')
+			if [ -z "$retries" ]; then
+				echo "The -t option must be followed by a" \
+					"number."
+				exit 2
+			fi
+			return 0
+		;;
+		"-h" | "--help")
+			printHelp
+			return 0
+		;;
+		-? | --*)
+			echo "Unknown parameter \"$1\""
+			exit 1
+		;;
+		-*)
+			# Split parameters.
+			readParams "${1%${1#-*}}"
+			readParams "-${1#-?}"
+			return 0
+		;;
+		*)
+			# Add to the list of ports that should be processed.
+			ports="$ports $1"
+			return 0
+		;;
+	esac
+
+	# The given parameter is not an option.
+	return 1
+}
+
+#
+# This is an attempt at emulating portupgrades port maching behaviour.
+# All ports' names that best match the supplied patterns will be printed.
+#
+# @param 1
+#	The recursion depth.
+# @param 2 till $n
+#	The port-name patterns to work on.
+# @param force
+#	Describes whether processing should be forced on up to date ports.
+# @param recursive
+#	If set ports depending on a given port will be processed, too.
+# @param upwardrecursive
+#	If set ports the given one depends on will be processed, too.
+# @return
+#	Returns 0 (true) after successful processing.
+#
+getPorts() {
+	local depth port candidate candidates shortest
+	test "$1" -gt 1 && return 0
+	depth="$(("$1" + 1))"
+	for port in "$@"; {
+		test "$port" \= "$1" && continue
+
+		# Handle port directory parameters.
+		if [ -d "$portsdir/$port" ]; then
+			if [ -n "$force" ]; then
+				echo "$port"
+			else
+				if pkg_version -IO "$port" \
+					grep \< > /dev/null 2>&1; then
+					echo "$port"
+				fi
+			fi
+
+			if [ -n "$recursive" ]; then
+				getPorts "$depth" $( \
+					pkg_info -qR $(pkg_info -qO "$port" \
+					2> /dev/null))
+			fi
+			if [ -n "$upwardrecursive" ]; then
+				getPorts $depth $( \
+					pkg_info -qr $(pkg_info -qO "$port" \
+					2> /dev/null) \
+					| sed 's/@pkgdep //1')
+			fi
+		# Handle parameters that look like package names.
+		else
+			candidates="$(pkg_info -Ex "$port")"
+			# The shortest candidate ist bound to be the best match.
+			shortest=
+			for candidate in $candidates; {
+				if [ ${#shortest} -eq 0 ]; then
+					shortest="$candidate"
+					continue
+				elif [ ${#shortest} -gt ${#candidate} ]; then
+					shortest="$candidate"
+				fi
+			}
+			shortest="$(pkg_info -qo "$shortest" 2> /dev/null)"
+			if [ -n "$force" ]; then
+				echo "$shortest"
+			else
+				if pkg_version -IO "$shortest" \
+					grep \< > /dev/null 2>&1
+				then
+					echo "$shortest"
+				fi
+			fi
+
+			if [ -n "$recursive" ]; then
+				getPorts "$depth" $( \
+					pkg_info -qR $(
+						pkg_info -qO "$shortest"
+					))
+			fi
+			if [ -n "$upwardrecursive" ]; then
+				getPorts "$depth" $( \
+					pkg_info -qr $(
+						pkg_info -qO "$shortest"
+					) | sed 's/@pkgdep //1')
+			fi
+		fi
+	}
+	return 0
+}
+
+# Collect the ports that are to be processed.
+ports=
+for parameter; {
+	readParams $parameter
+}
+
+# Determine portsdir
+portsdir=$(make -V PORTSDIR -f /usr/share/mk/bsd.port.mk)
+if [ ! -d $portsdir ]; then
+	echo "The PORTSDIR '$portsdir' is missing."
+	exit 1
+fi
+
+# Get the ports to proceed.
+upgrade=
+# All ports are to be processed.
+if [ -n "$all" ]; then
+	if [ -n "$force" ]; then
+		upgrade="$(pkg_info -aqo)"
+	else
+		upgrade="$(pkg_version -Iol\< | sed -E 's/[[:space:]]*<$//1')"
+	fi
+fi
+# Handle explicitly requested ports.
+upgrade="$upgrade
+$(getPorts 0 $ports)"
+
+# Merge upgrade and install list.
+ports=$(echo "$upgrade" | sort | uniq | grep -Ev '^$')
+
+if [ -n "$verbose" ]; then
+	echo "The following ports will be affected:"
+	echo "$ports"
+fi
+
+# Collect failed ports here.
+failed_ports=
+
+# Run command for all selected ports.
+for port in $ports; {
+	if [ -n "$verbose" ]; then
+		echo "Make '$command' for '$port'"
+	fi
+
+	# Run the command until the given number of tries is reached.
+	count=0
+	while !	(cd "$portsdir/$port" && make "$command"); do
+		# There are no more tries left.
+		if [ "$count" -ge "$retries" ]; then
+			# The command failed on the last try. Count your losses.
+			failed_ports="$failed_ports $port"
+			break 1
+		fi
+
+		count="$(("$count" + 1))"
+	done
+}
+
+# Inform the user of ports which did not return 0.
+if [ -n "$failed_ports" ]; then
+	echo "The following ports failed: $failed_ports"
+fi
+

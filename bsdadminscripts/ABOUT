@@ -1,0 +1,17 @@
+BSDAdminScripts is a collection of administrative shell scripts for FreeBSD.
+It started from a selection of shell scripts I wrote for my personal use,
+but has since outgrown this heritage.
+
+At the moment everything is licensed under a single clause BSD license. I simply
+took the license from the FreeBSD project and removed the clauses I do not
+need.
+
+I try to maintain compatibilty to older versions with every update, also the
+code is heavily commented. Feel free to read it, point out bugs, make
+suggestions or just get some inspiration for your own scripts. I'm constantly
+learning new cool stuff you can do in a shell script.
+
+I am a computer science student at the Karlsruhe University of Applied Sciences
+and a member of the BSDForen.de team.
+
+- Dominic Fandrey <kamikaze@bsdforen.de>

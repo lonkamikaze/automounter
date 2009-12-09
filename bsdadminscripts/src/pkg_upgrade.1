@@ -1,0 +1,676 @@
+.\"
+.\" Copyright (c) 2009
+.\" Dominic Fandrey <kamikaze@bsdforen.de>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\"
+.Dd June 5, 2009
+.Dt PKG_UPGRADE 1
+.Os
+.Sh NAME
+.Nm pkg_upgrade
+.Nd binary package management tool
+.Sh SYNOPSIS
+.Nm
+.Fl h
+.Nm
+.Fl a
+.Op Fl bcCdfFlnpvX
+.Op Fl o Ar new existing
+.Op Ar update
+.Op Ar install
+.Nm
+.Op Fl bcCdfFlnpvX 
+.Op Fl r Op Fl r
+.Op Fl R Op Fl R
+.Op Fl o Ar new existing
+.Op Ar update
+.Op Ar install
+.Sh DESCRIPTION
+The
+.Nm
+script allows the updating, installing and replacing of packages without
+using a local copy of the ports tree. Instead most required information is
+listed in an INDEX file that is kept in sync with the package server by
+.Xr uma 1 .
+.Sh OPTIONS
+The following options are available:
+.Bl -tag -width indent
+.It Fl a -all
+Updates all outdated packages listed in the INDEX file.
+.Pp
+This flag is mutually exclusive with the
+.Fl r
+and
+.Fl R
+flags.
+.It Fl b -no-backup
+Normally
+.Nm
+creates backups of deleted packages and leaves them in
+"%%PORTS%%/packages/pkg_upgrade-backup".
+This flag causes the deletion of theses backups right after a successful
+package installation or roll-back.
+.It Fl c -clean
+Create clean output without status messages.
+.It Fl C -replace-conflicts
+Causes existing packages that conflict with a new package to be replaced by
+the new package.
+.Pp
+This flag is mutually exclusive with
+.Fl X .
+.It Fl d -list-discarded
+List the packages that are ignored because they are not indexed.
+.It Fl f -force
+Assume every indexed package currently installed is outdated.
+.It Fl F -fetch-only
+Instead of performing any updates, just download all packages that would have
+been required.
+.It Fl h -help
+Displays the available options and terminate.
+.It Fl l -no-logging
+Deactivate the logging of package installations.
+.It Fl n -no-actions
+Instead of downloading required packages and performing the requested package
+updates and installations, just print what would have been done.
+.It Fl o -origin Ar new existing
+This flag causes an
+.Ar existing
+package to be replaced with a
+.Ar new
+one. Both named packages should be unambiguous.
+.Pp
+An
+.Ar existing
+package can only be replaced once. While the
+.Ar existing
+argument only has to match an installed package or the origin of one, the
+.Ar new
+argument has to unambiguously identify a package listed in the INDEX file.
+For this the same rules as with the
+.Ar update
+and
+.Ar install
+arguments apply.
+.It Fl p -paranoid
+Activates additional checks.
+.Pp
+At the moment this only activates cyclic dependency checks.
+Cyclic dependencies can only be caused by errors in the ports tree used by
+the build server.
+.It Fl r -recursive
+Also process packages the given packages depend on. Note that this is the
+meaning of
+.Fl r
+used by
+.Xr pkg_info 1 ,
+not the meaning used by most popular port maintainance tools.
+.Pp
+The
+.Fl r
+flag can be specified a second time if the
+.Fl R
+flag is also given. It causes the dependencies of depending packages listed
+for updating to be processed as well.
+.It Fl R -upward-recursive
+Also process packages depending on the given packages.
+.Pp
+The
+.Fl R
+flag can also be specified for a second time to process packages depending
+on dependencies listed for updating as well. Because missing dependency checks
+are always performed, this does not require the
+.Fl r
+flag.
+.It Fl v -verbose
+Be verbose about what is currently being done.
+.It Fl X -exit-on-conflict
+Instead of performing some kind of conflict handling simply exit if a
+conflict is encountered.
+.Pp
+This flag is mutually exclusive with
+.Fl C .
+.It Ar update install
+These arguments are either packages to update or to install. The
+.Nm
+script differs between package files, package names and origins when
+interpreting these arguments.
+.Pp
+Apart from files everything containing a "/" character is treated as an origin
+(e.g. "sysutils/bsdadminscripts"). Everything else is assumed to be a package
+name.
+.Pp
+Origins or package names can either be explicit or contain the wildcards
+"*", "[...]" and "?". Whereas "*" matches any string, "?" matches any single character. The square brackets "[" and "]" enclose a list of characters that
+may be matched by a single character.
+.Pp
+Arguments without wildcards are always attempted to be matched against a
+single package listed in the INDEX. Arguments with wildcards on the other
+hand can match more than one package. However wildcards are only matched
+against installed packages, so they can only be used for updating.
+To install new packages, the argument must not contain any wildcards.
+.Pp
+While using origins is relatively simple, package names without wildcards
+are subject to a lot of guessing. If the complete argument either exactly
+matches an installed package or one listed in the INDEX, the identification
+is unambiguous.
+.Pp
+If not
+.Nm
+tries to treat the argument as a LATEST_LINK (see bsd.ports.mk). The actual
+LATEST_LINK name of indexed packages however, is not known, so this is a
+guessing effort. This generally works quite well, but has some side effects.
+.Pp
+E.g. "apache" matches whichever version of Apache is already installed. If no
+version of Apache is installed, the argument fails. The argument "apache13"
+however always matches "www/apache13". To match "russian/apache13",
+"ru-apache13" would be a working argument.
+.El
+.Sh NOTES
+.Ss CONFIGURATION FILE
+The
+.Nm
+script can be influenced by a number of environment variables (see the
+ENVIRONMENT section below). Instead of specifying them in the environment
+they can also be set in the configuration file
+"%%PREFIX%%/etc/pkg_upgrade.conf".
+.Ss EXPLICIT AND IMPLICIT UPDATES
+To
+.Nm
+there are two ways to specify packages, explicitely and implicitely.
+Explicitely named packages are those provided as the
+.Ar update
+and
+.Ar install
+arguments.
+.Pp
+Implicitely named packages are missing dependencies and those
+enlisted through the
+.Fl r ,
+.Fl R
+and
+.Fl a
+parameters. While explicitely named packages are always reinstalled,
+implicitely named packages have to be outdated or missing, to be enlisted.
+This can be changed with the
+.Fl f
+parameter.
+.Ss LIBRARY CHANGES
+Sometimes package updates cause library changes that break depending packages.
+Most of these cases can be identfied by running
+.Xr pkg_libchk 1
+before and after using
+.Nm .
+The packages that yield new library errors should be explicitely updated with
+.Nm .
+.Sh IMPLEMENTATION NOTES
+The purpose of
+.Nm
+is to update, reinstall and install binary packages. This task is divided
+into ten major steps.
+.Ss PARAMETERS
+The first task is to parse the given parameters. The order of parameters
+has no influence on the activities performed by
+.Nm .
+However if any packages are specified before the
+.Fl v
+flag the INDEX will be updated without the flag (should it appear later)
+yet having an effect.
+.Pp
+The
+.Nm
+script is very strict about the parameters given. Contradicting parameters
+or unidentified package names and origins result in immediate program
+termination.
+.Ss IDENTIFYING FILES
+The next step is to identify packages that were directly specified as files,
+detect their origin and package names and match their dependencies to the
+indexed packages.
+.Ss LISTING OUTDATED PACKAGES
+Afterwards a list of outdated packages is created. If the
+.Fl a
+flag is provided all outdated packages will directly be scheduled for updating
+instead. Only indexed packages are considered by
+.Nm
+in any way. Every unindexed package will be ignored unless it conflicts
+with a package to install.
+.Pp
+This is the stage when the
+.Fl f
+flag takes effect. With this flag every installed package in the index will
+be assumed outdated.
+.Ss DEPENDENCIES
+During this step the list of scheduled updates gets checked for missing
+dependencies. If the
+.Fl r
+flag is provided not only missing, but also outdated dependencies will be
+added to the list of packages to update.
+.Pp
+Depending on the presence of further
+.Fl r
+and
+.Fl R
+flags, this process is repeated with the packages newly listed for updating
+until no new ones show up.
+.Pp
+All dependency information is derived solely from the index.
+.Ss SORTING
+The next step is to sort packages in order of dependency. This is simply
+done by adding every package to update to a list of sorted packages and
+putting it into the earliest position possible that is behind all its
+already present dependencies.
+.Pp
+The only way for this to fail is a cyclic dependency. Cyclic dependency
+checking can be activated with the
+.Fl p
+flag. Unless the ports tree used by the build server is broken, cyclic
+dependencies do not occur, though.
+.Ss DOWNLOADING
+When reaching this stage, downloading has usually already started at this
+point. Normally a download manager has been dispatched after
+the index was updated and it has started downloading from the servers listed
+in
+.Ar PACKAGESITE_MIRRORS .
+.Pp
+So during this stage
+.Nm
+waits for finished downloads and checks the package integrity. If a package
+is broken, a redownload from the server listed in
+.Ar PACKAGESITE
+is attempted. If the package is still not valid,
+.Nm
+terminates. Informations on the background downloading are available in the
+DOWNLOAD MANAGER section below.
+.Pp
+If the packages are locally available (e.g. over NFS) the fetching (and
+duplicating) of packages can be avoided by setting the environment variable
+.Ar PACKAGES
+to the package tree and setting
+.Ar PACKAGESITE
+to "$PACKAGES/Latest".
+.Ss UPGRADING
+The most important step is to backup, update, install, replace
+all the listed packages and deal with conflicts.
+.Pp
+During all this dependency relations from old or replaced packages are
+inherited by the new ones. The dependency relations of conflicting packages
+are also preserved.
+The treating of conflicts can be changed with the
+.Fl C
+and
+.Fl X
+flags.
+.Pp
+Upon installation failure, the backup is restored and the script terminates.
+.Pp
+The
+.Fl b
+flag can be used to cause the deletion of backups after completion of a
+package installation or a performed roll-back.
+.Ss PACKAGE MESSAGES
+In the next step the package messages of installed packages are collected
+in a file if one is specified in the environment variable
+.Ar COLLECT_MESSAGES .
+.Ss PACKAGE CHECKS
+Afterwards the installed packages are checked for missing files. If a file
+is missing from a package, the package will be reinstalled. This can solve
+problems caused by splitting packages up from one version to teh next.
+.Pp
+If there are still missing files afterwards, the user is notified that the
+package is broken and it is suggested to contact the maintainer of the port.
+.Pp
+If the environment variable
+.Ar COLLECT_MISSING
+specifies a file this is also recorded in a file.
+.Sh IMPLEMENTATION DETAILS
+This section details certain aspects of the
+.Nm
+implementation.
+.Ss CONFLICTS
+The default conflict handling approach of
+.Nm
+is to assume that conflicting packages, which are already installed,
+provide the required functionality and the installation of the new package
+is skipped in favour of the conflicting ones.
+.Pp
+The approach triggered by the
+.Fl C
+flag is to take over the functionality of the conflicting packages. They get
+deinstalled in favour of the new package, inheriting all the upwards
+dependency relations.
+.Pp
+The
+.Fl X
+flag simply causes
+.Nm
+to quit and the user is left to decide what to do about a conflict.
+.Ss DOWNLOAD MANAGER
+The download manager is a background process that creates a temporary file used
+as a message queue.
+.Pp
+The main process requests downloads from the manager by writing the requests
+into the queue. There is no communication from the download manager to the
+main process. So the main process gains informations about the download manager
+by spying on the queue.
+.Pp
+The download manager dispatches downloads for each mirror listed in
+.Ar PACKAGESITE_MIRRORS .
+These downloads inform the download manager of their success through the queue.
+.Pp
+Should a download fail, it is listed for retrying and another attempt is made
+from a different mirror as soon as there is nothing else left to download.
+Should the download fail from all mirrors, it is the responsibilty of the main
+process to retrieve the file from the master server specified in
+.Ar PACKAGESITE .
+.Pp
+The download manager is explicitely told through the queue to exit. However
+it also checks at least every 2 seconds whether the main process is still
+around. If the main process is gone (e.g. was killed or terminated because of
+an error), the download manager stops all dispatched downloads, deletes the
+queue and terminates.
+.Ss LOCKING
+For
+.Nm
+to work reliably it is required that neither the package database nor the
+local INDEX copy are changed during operation. So before the index copy is
+updated, a lock is acquired from
+.Xr uma 1 .
+It ensures that no other
+.Xr uma 1
+using tool is in use and that there is no make activity in the ports tree.
+.Pp
+However, that does not keep any one or any program from using the ports tree
+after the lock has been granted by
+.Xr uma 1 .
+.Pp
+To prevent this from happening a lock on
+.Ar PKG_DBDIR
+is acquired. The ports tree locks on PKG_DBDIR during install and deinstall
+to allow the parallel building of several ports. So this lock will keep the
+ports from messing until
+.Nm
+is done.
+.Pp
+Both locks are kept until the script terminates.
+.Ss LOGGING
+Unless the
+.Fl l
+parameter is supplied
+.Nm
+creates a log file with information about performed update, install and
+replace tasks in "%%VAR%%/log/pkg_upgrade.log".
+It also contains output on performed conflict handling.
+.Pp
+The log file format provides a compromise between machine and human
+readability.
+.Ss LOGFILE PSEUDO BNF
+.Bl -tag -compact
+.It LOG
+::= (LINE + LF)*
+.It LINE
+::= TIMESTAMP + " - " + DATE + " - " + TEXT
+.It LF
+::= <The line feed character, often called "\\n">
+.It TIMESTAMP
+::= <The output of "date -u '+%s'", UTC time in seconds since Jan 1, 1970>
+.It DATE
+::= <The output of "date", human readable and locale dependent>
+.It TEXT
+::= ("ERROR(" + ERROR + ")" | "MESSAGE") + ": " + MESSAGE
+.It ERROR
+::= <A number that can be looked up in the EXIT CODES section>
+.It MESSAGE
+::= <A text message about the task performed.>
+.El
+.Ss OUTPUT
+Output occurs through four different channels. Verbose and regular output
+occurs on stdout, whereas warnings and errors are reported on stderr. The
+same applies to the system pkg-tools, used during package installation.
+.Pp
+Status or progress messages are written directly to the terminal (tty) and evade
+regular output redirection. If this causes any problems, they can be turned
+off using the
+.Fl c
+flag.
+.Pp
+Completed and failed package installations as well as conflicts are,
+additionally to the regular output, reported in a log file. Please see the
+LOGGING section above for more information.
+.Sh EXAMPLES
+The following command lists all update operations:
+.Bd -literal -offset indent
+pkg_upgrade -an
+.Ed
+.Pp
+This command updates all indexed packages:
+.Bd -literal -offset indent
+pkg_upgrade -a
+.Ed
+.Pp
+This command reinstalls all indexed packages:
+.Bd -literal -offset indent
+pkg_upgrade -fa
+.Ed
+.Pp
+The next command reinstalls "www/firefox3" and updates all packages it
+depends on:
+.Bd -literal -offset indent
+pkg_upgrade -r firefox3
+.Ed
+.Pp
+This command reinstalls "www/firefox3" and all packages it depends on:
+.Bd -literal -offset indent
+pkg_upgrade -fr firefox3
+.Ed
+.Pp
+This command reinstalls "devel/glib20" and updates all packages depending on
+it:
+.Bd -literal -offset indent
+pkg_upgrade -R devel/glib20
+.Ed
+.Pp
+The following command reinstalls "devel/glib20" and updates all packages it
+depends on, all packages depending on it and all other packages that might
+be affected:
+.Bd -literal -offset indent
+pkg_upgrade -rrRR devel/glib20
+.Ed
+.Pp
+Note that adding the
+.Fl f
+flag to this would result in an update almost as monumental as
+.Fl fa .
+.Pp
+Now assume "apsfilter" was installed, but it installed the US letter versions
+of "a2ps" and "psutils", however German A4 paper is used for printing.
+.Pp
+The following command can take care of this:
+.Bd -literal -offset indent
+pkg_upgrade -o a2ps-a4 a2ps-letter -o psutils-a4 psutils-letter
+.Ed
+.Pp
+The next command does the same for lazy people:
+.Bd -literal -offset indent
+pkg_upgrade -C a2ps-a4 psutils-a4
+.Ed
+.Pp
+With the
+.Fl C
+flag the listed packages simply replace what they conflict with.
+.Sh ENVIRONMENT
+Certain aspects of the
+.Nm
+utility and several of the underlying applications can be configured by
+setting environment variables.
+.Bl -tag -width indent
+.It Ar COLLECT_MESSAGES
+This can be used to specify a file to collect package messages of installed
+packages in. By default it is not set.
+.It Ar COLLECT_MISSING
+This can be used to specify a file to list packages and the files they are
+missing after install. This is also not set by default.
+.It Ar FTP_PASSIVE_MODE
+This is used to turn passive FTP on or off. Its use is to perform ftp downloads
+through a firewall blocking incoming traffic.
+.Pp
+This is provided by
+.Xr uma 1 .
+.It Ar FTP_TIMEOUT
+This is the time in seconds used by
+.Xr fetch 1
+to time out download attempts.
+.Pp
+This is provided by
+.Xr uma 1 .
+.It Ar PACKAGES
+This is the location of the local package repository. Both downloaded
+and backed up packages are stored there.
+.Pp
+If a ports tree is present it defaults to the output of the command
+"make -V PACKAGES -f /usr/share/mk/bsd.port.mk".
+Otherwise it defaults to "%%PORTS%%/packages".
+.It Ar PACKAGESITE
+This is provided by
+.Xr uma 1
+and used as the fallback location to download packages from. By setting it to
+"$PACKAGES/Latest" download activities can be avoided. This can be considered
+the master server that is used if the mirrors fail.
+.It Ar PACKAGESITE_MIRRORS
+This is provided by
+.Xr uma 1
+and used by the download manager to download the required packages in
+background.
+.It Ar PKG_DBDIR
+This is used by the system package tools
+.Xr pkg_version 1 ,
+.Xr pkg_create 1 ,
+.Xr pkg_delete 1
+and
+.Xr pkg_add 1
+as well as
+.Nm
+itself to keep the the database of installed packages consistent.
+.Pp
+It defaults to "%%VAR%%/db/pkg".
+.It Ar PKG_INDEX
+This is provided by
+.Xr uma 1
+and the location of the local INDEX copy maintained by it. This is critical
+to everything
+.Nm
+does.
+.It Ar PKG_TMPDIR
+This is used by the system package tools
+.Xr pkg_create 1 ,
+and
+.Xr pkg_add 1 .
+.Pp
+It defaults to "$TMPDIR".
+.It Ar TMPDIR
+The location that will be used for temporary files.
+.Pp
+It defaults to "%%TMP%%".
+.El
+.Sh FILES
+.Nm
+uses and creates a number of files and directories.
+.Bl -tag -width indent
+.It %%PREFIX%%/etc/pkg_upgrade.conf
+A configuration file that can be used to set environment variables for
+.Nm .
+.It %%PREFIX%%/etc/pkg_upgrade.conf.sample
+An example configuration.
+.It $PACKAGES/All
+All downloaded packages are stored in this directory.
+.It $PACKAGES/pkg_upgrade-backup
+All backed up packages are stored in this directory.
+.It $PKG_INDEX
+The index file provided by
+.Xr uma 1
+is used to identify packages and collect dependency information from.
+It basically is the source of all information required by
+.Nm .
+.It %%VAR%%/log/pkg_upgrade.log
+Performed package installations and conflict handling are logged in this file.
+.El
+.Sh EXIT CODES
+Every error causes the immediate termination of
+.Nm .
+Errors are numbered in the order of implementation.
+.Bl -tag -width indent
+.It ERR_LOCK 1
+A lock could not be acquired from
+.Xr uma 1
+or on
+.Ar PKG_DBDIR .
+Either the script was not run as root, another process was holding the lock
+or there was make activity in the ports directory.
+.It ERR_ARG 2
+An inprobabal argument was supplied. Either conflicting flags were provided
+or packages that are not indexed were listed.
+.It ERR_INDEX 3
+.Xr uma 1
+failed to provide an up to date copy of the remote index.
+.It ERR_FETCH 4
+Fetching a required package failed.
+.It ERR_SORT 5
+A cyclic dependency was detected. This error can only occur with the
+.Fl p
+flag.
+.It ERR_BACKUP_MISS 6
+A recent package backup has disappeared. This is highly improbable.
+.It ERR_BACKUP_UNKNOWN 7
+There was an unknown error when backing up a package.
+.It ERR_INSTALL 8
+There was an error while installing a package. The most likely cause is a
+lack of disk space.
+.It ERR_USER 9
+The installation was stopped by SIGINT (see
+.Xr signal 3 ) .
+This is normally caused by the user pressing CTRL-C.
+.It ERR_TERM 10
+The installation was stopped by SIGTERM (see
+.Xr signal 3 ) .
+.It ERR_PACKAGE_FORMAT 11
+The package to install has an unknown package format. The only currently
+supported format is "1.1".
+.It ERR_CONFLICT 12
+A package to install conflicts with another one. This can only occur when
+the
+.Fl X
+flag is set.
+.El
+.Sh COMPATIBILITY
+The script has been tested on FreeBSD 7.2-STABLE.
+.Sh SEE ALSO
+.Xr bsdadminscripts 1 ,
+.Xr uma 1 ,
+.Xr pkg_libchk 1 ,
+.Xr pkg_version 1 ,
+.Xr pkg_create 1 ,
+.Xr pkg_delete 1 ,
+.Xr pkg_add 1 ,
+.Xr fetch 1
+.Sh HISTORY
+The
+.Nm
+script first appeared in the bsdadminscripts-6.0 collection.
+.Sh AUTHOR
+Dominic Fandrey <kamikaze@bsdforen.de>

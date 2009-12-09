@@ -1,0 +1,19 @@
+#
+# This file lists some examples for environmental settings to influence UMA.
+# Uncomment to use.
+#
+
+#
+# Fast FTP time outs.
+#
+#FTP_TIMEOUT=10
+
+#
+# Use release packages on STABLE and CURRENT systems.
+#
+#BRANCH=7.2-release
+
+#
+# Use German mirrors.
+#
+#PACKAGEROOT_MIRRORS="ftp://ftp.de.FreeBSD.org;ftp://ftp2.de.FreeBSD.org;ftp://ftp3.de.FreeBSD.org;ftp://ftp4.de.FreeBSD.org;ftp://ftp5.de.FreeBSD.org;ftp://ftp6.de.FreeBSD.org;ftp://ftp7.de.FreeBSD.org;ftp://ftp8.de.FreeBSD.org"

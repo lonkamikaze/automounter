@@ -1,0 +1,195 @@
+#!/bin/sh
+#
+# Copyright (c) 2006-2009
+# Dominic Fandrey <kamikaze@bsdforen.de>
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+readonly name=rcstart
+readonly version=1.5.1
+
+# Get a list of all startup script paths.
+{
+	# Obtain script paths.
+	. /etc/defaults/rc.conf
+	for file in $rc_conf_files; {
+		test -e "$file" && . $file
+	}
+	suggested_script_paths="/etc/rc.d $local_startup"
+
+	# Forget inexistant paths.
+	script_paths=
+	for path in $suggested_script_paths; {
+		test -d "$path" && script_paths="$script_paths $path"
+	}
+	# Remove the space at the beginning.
+	script_paths="${script_paths## }"
+}
+
+# Use the script call as a command given to the selected startscript.
+# Several commands can be realized with links to this script,
+# such as stop, status, onestart and so on. All with the prefix 'rc'.
+command="${0##*rc}"
+
+#
+# Outputs a list of all services provided by the available startup scripts.
+#
+# @param $script_paths
+#	The locations to check for scripts.
+#
+listServices() {
+	# Grep for services over all startup scripts.
+	# This looks a bit messy because it is not relying on a fixed amount
+	# of spaces and tabs.
+	for script_path in $script_paths; {
+		grep -Eh '#[[:space:]]*PROVIDE:[[:space:]]*' $script_path/* | \
+			sed	-e 's|#[[:space:]]*PROVIDE:[[:space:]]*||1' \
+				-e 's|[[:space:]]+||g'
+	}
+}
+
+# Option triggers.
+display_mode=0
+
+# Display help.
+printHelp() {
+	echo "$name ($command) v$version
+usage:	rc$command [-v] [-n] [-p] [-s] [-l] [-h] [services]"
+}
+
+#
+# Read parameters.
+#
+# @param $1
+#	The supplied parameter.
+# @param $display_mode
+#	Is set to one of the following values:
+#	0 - normal display
+#	1 - verbose display
+#	2 - display script locations
+# @param $script_paths
+#	Is required if the printing of script paths is requested.
+# @return
+#	Returns 0 (true) for known and 1 (false) for unknown parameters.
+#
+readParams() {
+	case $1 in
+		"-v" | "--verbose")
+			display_mode=1
+			return 0
+		;;
+		"-n" | "--not-verbose" )
+			display_mode=0
+			return 0
+		;;
+		"-p" | "--paths")
+			printf "$(
+				echo "$script_paths" | \
+					sed -E 's|[[:space:]]+|\\n|g'
+			)\n"
+			return 0
+		;;
+		"-s" | "--services")
+			listServices
+			return 0
+		;;
+		"-l" | "--locate")
+			display_mode=2
+			return 0
+		;;
+		"-h" | "--help")
+			printHelp
+			return 0
+		;;
+		-? | --*)
+			echo "Unknown parameter \"$1\"."
+			return 0
+		;;
+		-*)
+			# Split chained parameters.
+			readParams "${1%${1#-?}}"
+			readParams "-${1#-?}"
+			return 0
+		;;
+	esac
+
+	# The given parameter is not an option.
+	return 1
+}
+
+#
+# Looks for the scripts that provide the service given as the first parameter.
+# This paramter is treated as a regular expression.
+#
+# @param $1
+#	The script to run.
+# @param $command
+#	The command to run the script with.
+# @param $script_paths
+#	The paths to search for the script.
+# @param $display_mode
+#	Tells the function what should be displayed.
+#
+runScript() {
+	# This is the regular expression to find a service.
+	provide_expr="#[[:space:]]*PROVIDE:[[:space:]]*"
+	service_expr="$provide_expr$1[[:space:]]*\$"
+
+	# Go through the list of script_paths and execute the first
+	# script that provides the wanted service.
+	for script_path in $script_paths; {
+		# Find matching scripts in this folder.
+		scripts=$(grep -El "$service_expr" $script_path/* 2> /dev/null)
+		for script in $scripts; {
+			# Ignore non executable scripts.
+			test -x $script || continue
+
+			# Get the name of the provided service.
+			service="$(
+				grep -E "$service_expr" "$script" | \
+					sed -E	-e "s|$provide_expr||1" \
+						-e 's|[[:space:]]+||g'
+			)"
+
+			# locate mode
+			if [ "$display_mode" -eq 2 ]; then
+				echo "$service:	$script"
+				continue
+			fi
+
+			# verbose mode
+			if [ "$display_mode" -eq 1 ]; then
+				echo "$service command:	$script $command"
+				eval "$script $command"
+				echo "$service returned:	$?"
+				continue
+			fi
+
+			eval "$script $command"
+			continue
+		}
+	}
+}
+
+# Run the requested services.
+for parameter; {
+	if ! readParams "$parameter" ; then
+		runScript "$parameter"
+	fi
+}

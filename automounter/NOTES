@@ -1,0 +1,8 @@
+This release prevents amds umount attempts when a file handle on a file
+system is openend and thus reduces the risk of closed file handles,
+that can lead to problems like a shell forgetting its current location.
+
+- automounter 1.3.4
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 8 automounter' and 'man 5 automounter.conf' for introductions.

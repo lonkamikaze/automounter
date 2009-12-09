@@ -1,0 +1,44 @@
+This is a bugfix release, fixing a problem with the branch detection in UMA.
+
+- buildflags
+  buildflags.mk v1.11
+  buildflags.awk v1.2
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 buildflags.mk', 'man 1 buildflags.conf' 
+ and 'man 1 buildflags.awk' for introductions.
+
+- distviper v1.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 disviper' for an introduction.
+
+- pkg_libchk v1.6.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 pkg_libchk' for an introduction.
+
+- pkg_upgrade v1.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 pkg_upgrade' for an introduction.
+
+- pkg_validate v1.5.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 pkg_validate' for an introduction.
+
+- portconfig v1.9.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 portconfig' for an introduction.
+
+- rcstart v1.5.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 rcstart' for an introduction.
+
+- uma v1.1.1
+
+ * Tested on FreeBSD 7.2-STABLE
+ Please run 'man 1 uma' for an introduction.
