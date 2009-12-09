@@ -1,0 +1,104 @@
+.\"
+.\" Copyright (c) 2007-2009
+.\" Dominic Fandrey <kamikaze@bsdforen.de>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\"
+.Dd April 23, 2009
+.Dt PKG_VALIDATE 1
+.Os
+.Sh NAME
+.Nm pkg_validate
+.Nd count checksum mismatches and missing files of packages
+.Sh SYNOPSIS
+.Nm
+.Op Fl aGxXrdh
+.Op packages
+.Sh DESCRIPTION
+The
+.Nm
+script uses
+.Xr pkg_info 1
+to check for ports with checksum mismatches or missing files.
+.Pp
+Only invalid packages are printed out in columns showing the checksum mismatch
+(csum), missing files (miss), package name (package) and package origin
+(origin).
+.Pp
+Unless -r is defined, the last line is a summary.
+.Sh OPTIONS
+The following options are available:
+.Bl -tag -width indent
+.It Fl a -all
+Scan all packages. This is the default action in case no packages have been
+specified.
+.It Fl c -clean
+Do not print status messages.
+.It Fl G -no-glob-pattern
+Do not expend shell glob patterns for package names.
+.It Fl x -regex
+Treat package names as regular expressions.
+.It Fl X -extended-regex
+Treat package names as extended regular expressions.
+.It Fl r -raw-print
+Prints only the raw results, seperated by the delimiter. That means no summary,
+table header and table formatting.
+.It Fl dC -delimiterC
+Define the delimiter character. This is not limited to, but especially useful
+for raw printing. Note that only the first byte of C is used unless -r is also
+given.
+.It Fl h -help
+Displays the available options.
+.El
+.Pp
+Packages are package names or patterns matching these. The allowed parameters
+have the same effects on package matching as with
+.Xr pkg_info 1 .
+.Sh EXAMPLES
+To check all your packages run:
+.Bd -literal -offset indent
+pkg_validate
+.Ed
+.Pp
+To check all sql related packages with | as delimiter in raw format run:
+.Bd -literal -offset indent
+pkg_validate -rd\\| \\*sql\\*
+.Ed
+.Sh SOLVING PROBLEMS
+There is no general rule on how to act about damaged packages, a good way to
+start is to closer inspect the package using the command:
+.Bd -literal -offset indent
+pkg_info -g <package>
+.Ed
+.Pp
+Many files are expected to change and have a checksum mismatch (e.g. files that
+contain cached data). Often missing files are just errors in the plist and
+do not affect the port. Only a manual inspection can bring clarity.
+.Sh COMPATIBILITY
+The script has been tested on FreeBSD 7.2-PRERELEASE
+.Sh SEE ALSO
+.Xr bsdadminscripts 1 ,
+.Xr pkg_info 1
+.Sh HISTORY
+The
+.Nm
+script first appeared in the bsdadminscripts-3.0 collection.
+.Sh AUTHOR
+Dominic Fandrey <kamikaze@bsdforen.de>

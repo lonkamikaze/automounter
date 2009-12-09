@@ -1,0 +1,2 @@
+* Set UPGRADE_PORT=1 during pkg_delete and pkg_add
+* Find a way to operate without mirrors.
