@@ -352,7 +352,7 @@ bsda:messaging:FileSystemListener.receiveLine() {
 # A raw sender class, .
 #
 bsda:obj:createClass bsda:messaging:FileSystemSender \
-	implements:bsda:messaging:Sender
+	implements:bsda:messaging:Sender \
 	r:private:lock \
 		"A Lock instance." \
 	r:private:queue \

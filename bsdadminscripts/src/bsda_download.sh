@@ -44,6 +44,10 @@ bsda_download=1
 #
 : ${bsda_download_tmp="/tmp/$0.$$"}
 
+bsda:obj:createClass bsda:downloadController \
+	i:private:init \
+		"Sets up the downloader process." \
+
 #
 # This class represents a download manager. It should not be used directly,
 # but be dispatched by a bsda:download:Control instance.
@@ -57,9 +61,9 @@ bsda:obj:createClass bsda:download:Manager \
 	w:private:controllerPID \
 		"The process to watch. If this process dies so should the" \
 		"download manager."\
-	w:private:init \
+	i:private:init \
 		"The constructor." \
-	w:private:clean \
+	c:private:clean \
 		"The destructor." \
 
 #
@@ -319,7 +323,7 @@ bsda:obj:createClass bsda:download:Servers \
 	x:protected:mirrorsLeft \
 		"Returns whether there are still mirrors left." \
 	x:protected:popMirror \
-		"Pops a free server from the list."
+		"Pops a free server from the list." \
 	i:private:init \
 		"The constructor." \
 	c:private:clean \
@@ -436,15 +440,17 @@ bsda:obj:createClass bsda:download:Job \
 		"Adjust access to the getter method." \
 	w:private:target \
 		"The local target location." \
-	x:protected:getTarget \
+	x:public:getTarget \
 		"Adjust access to the getter method." \
 	w:protected:size \
 		"The download size." \
 	w:private:servers \
 		"A Servers instance that is used as a queue for untried" \
 		"download mirrors." \
-	x:private:init \
-		"The constructor."
+	i:private:init \
+		"The constructor." \
+	c:private:clean \
+		"The destructor." \
 	x:protected:downloadSucceeded \
 		"Called by a server if a download succeeded." \
 	x:protected:downloadFailed \
@@ -458,7 +464,7 @@ bsda:obj:createClass bsda:download:Job \
 # The constructor initializes attributes.
 #
 # @param 1
-#	A Servers instance to pulle the download servers from.
+#	A Servers instance to pull the download servers from.
 # @param 2
 #	The remote file name.
 # @param 3
@@ -475,6 +481,21 @@ bsda:download:Job.init() {
 	$this.setServers "$1"
 	$this.setSource "$2"
 	$this.setTarget "$3"
+}
+
+#
+# The destructor removes the list of servers.
+#
+bsda:download:Job.clean() {
+	local servers
+	$this.getServers servers
+
+	# Delete the list of servers if one is there (might not be the case
+	# if the constructor failed).
+	if bsda:download:Servers.isInstance "$servers"; then
+		$servers.delete
+	fi
+	return 0
 }
 
 #
