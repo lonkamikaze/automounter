@@ -250,6 +250,7 @@ bsda:messaging:FileSystemListener.clean() {
 
 	$lock.delete
 	test -n "$1" && rm "$queue"
+	return 0
 }
 
 #
@@ -380,7 +381,9 @@ bsda:messaging:FileSystemSender.init() {
 #
 # Borrow the destructor from the listener.
 #
-alias 'bsda:messaging:FileSystemSender.clean=bsda:messaging:FileSystemListener.clean'
+bsda:messaging:FileSystemSender.clean() {
+	bsda:messaging:FileSystemListener.clean "$@"
+}
 
 #
 # Sends a message.
