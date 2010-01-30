@@ -44,10 +44,6 @@ bsda_download=1
 #
 : ${bsda_download_tmp="/tmp/$0.$$"}
 
-bsda:obj:createClass bsda:downloadController \
-	i:private:init \
-		"Sets up the downloader process." \
-
 #
 # This class represents a download manager. It should not be used directly,
 # but be dispatched by a bsda:download:Control instance.
@@ -60,11 +56,35 @@ bsda:obj:createClass bsda:download:Manager \
 		"The servers to work with." \
 	w:private:controllerPID \
 		"The process to watch. If this process dies so should the" \
-		"download manager."\
+		"download manager." \
 	i:private:init \
 		"The constructor." \
 	c:private:clean \
 		"The destructor." \
+
+#
+# The constructor forks away the background downloading process and offers
+# functions for download requests.
+#
+# @param 1
+#	A Servers instance, which is used for downloading.
+# @return
+#	1 if the parameter 1 is not a bsda:download:Servers instance.
+#
+bsda:download:Manager.init() {
+	# Remember this process ID, it's required for the background
+	# downloader to terminate if the master process dies.
+	# It is also required by the job method to decide whether it's called
+	# in the background process or in the controlling process.
+	setvar ${this}controllerPID $$
+
+	# The servers list.
+	bsda:download:Servers.isInstance "$1" || return 1
+	setvar ${this}servers $1
+
+	#TODO: fork away the background downloader, probably write a
+	# static method for this.
+}
 
 #
 # Instances of this class represent a download location.
@@ -335,28 +355,31 @@ bsda:obj:createClass bsda:download:Servers \
 #
 # @param 1
 #	The master server.
-# @param 2
-#	A newline separated list of mirrors.
+# @param @
+#	All following server instances are objects.
 # @return
 #	0 if everything goes fine
 #	1 if the master service is not a bsda:download:Server instance
 #	2 if one of the mirrors is not a bsda:download:Server instance
 #
 bsda:download:Servers.init() {
-	local IFS mirror
+	local IFS mirrors
 
 	IFS='
 '
 
-	# Perform parameter checks.
+	# Check and store the master.
 	bsda:download:Server.isInstance "$1" || return 1
-	for mirror in $2; {
-		bsda:download:Server.isInstance "$mirror" || return 2
-	}
-
-	# Store servers.
 	$this.setMaster "$1"
-	$this.setMirrors "$2"
+
+	# Check and store the mirrors.
+	mirrors=
+	while [ -n "$2" ]; do
+		bsda:download:Server.isInstance "$2" || return 2
+		mirrors="${mirrors:+$mirrors$IFS}$2"
+		shift
+	done
+	$this.setMirrors "$mirrors"
 }
 
 #
