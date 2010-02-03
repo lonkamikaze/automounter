@@ -1,3 +1,7 @@
+automounter-1.3.5 (February 3, 2010):
+  - Block mounting by file system ID by default, because it works only once.
+  - Remove the second license clause.
+
 automounter-1.3.4 (August 13, 2009):
   - Block umounts during file system activity, because it can cause tcsh to
     forget the current directory.

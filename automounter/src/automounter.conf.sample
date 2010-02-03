@@ -84,5 +84,5 @@
 #
 
 #blacklist_devs="ad*,acd*"
-#blacklist_nodes="ufs/*"
+#blacklist_nodes="*id/*,ufs/*"
 
