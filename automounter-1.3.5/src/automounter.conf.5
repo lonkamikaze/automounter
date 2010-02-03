@@ -1,0 +1,233 @@
+.\"
+.\" Copyright (c) 2008, 2009, 2010
+.\" Dominic Fandrey <kamikaze@bsdforen.de>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\"
+.Dd Feb 3, 2010
+.Dt AUTOMOUNTER.CONF 5
+.Os
+.Sh NAME
+.Nm automounter.conf
+.Nd Define runtime parameters for automounter.
+.Sh DESCRIPTION
+The
+.Nm
+file is a shell script that gets sourced into the
+.Xr automounter 8
+script after the default settings have been defined. By overwriting variables
+these settings can be changed.
+.Pp
+No checks are performed on these settings, it is the responsibility of the
+system administrator to create a working configuration. For many systems
+the defaults ought to be fine and a configuration file is not required
+at all.
+.Sh AMD SETTINGS
+The following variables can be used to control the behaviour of
+.Xr amd 8 .
+Please refer to that manual page for descriptions. The following will only
+list the defaults unless the variables are further processed.
+.Pp
+Unless noted otherweise after changing any of these settings automounter has to
+be restarted. Failing to do so can result in an inconsistent state.
+.Bl -tag -width indent
+.It a="%%RUN%%/automounter.amd"
+.It c=2
+.It w=1
+.It l="%%RUN%%/automounter.amd.log"
+.It directory="%%RUN%%/automounter.amd.mnt"
+.It map="%%RUN%%/automounter.amd.map"
+This is the location of the dynamically created map.
+.It pidfile="%%RUN%%/automounter.amd.pid"
+The PID file for
+.Xr amd 8 .
+Changing this will break the
+.Xr rc 8
+script.
+.It static_map="%%MAP%%"
+The map file that will be used to build the dynamic map from.
+.Pp
+For this setting to take effect an update call is sufficient.
+.El
+.Sh RUNTIME SETTINGS
+.Bl -tag -width indent
+.It blacklist_devs
+This variable can be used to exclude devices from automounting. The devices
+are Shell-Patterns separated by ','.
+.Pp
+The following example excludes ATA disks and CD-/DVD-drives:
+.Bd -literal -offset indent
+blacklist_devs="ad*,acd*"
+.Ed
+.Pp
+Changing blacklist_devs takes effect after an update call.
+.It blacklist_nodes="*id/*"
+This allows blacklisting by mount names. Like blacklist_devs it is a ','
+separated list of Shell-Patterns. The following example blacklists all
+ufs partitions:
+.Bd -literal -offset indent
+blacklist_nodes="ufs/*"
+.Ed
+.Pp
+Changing blacklist_nodes takes effect after an update call.
+.It devfs="%%DEVFS%%"
+The location of the
+.Xr devfs 5 .
+This is required to know where to find the mount device nodes.
+.Pp
+This setting takes immediate effect.
+.It evil_fuse=0
+Setting this to 1 will activate a bug workaround for fuse based file systems
+such as ntfs-3g from the sysutils/fusefs-ntfs port. Fuse closes all opened
+files when an unmount is attempted. With automounter this happens every
+second by default.
+.Pp
+The workaround uses
+.Xr fstat 1
+to check weather files are opened on fuse based file systems and prevents
+the unmount command from being run if this is the case. The downside is that
+fstat is not able to see on which fuse file system the file is opened.
+So all fuse file systems remain mounted until there are no more opened files
+on any of them.
+.Pp
+As long as only one fuse based file system is in use there are no downsides
+to using this workaround.
+.Pp
+The workaround takes immediate effect.
+.It iso9660=cd9660
+This is obligatory to mount optical discs.
+.Pp
+This setting takes immediate effect.
+.It iso9660_options=ro
+This is more appropriate for optical devices than the default mount options.
+.Pp
+This setting takes immediate effect.
+.It linkdir="%%MEDIA%%"
+The directory that will be populated with the links to
+.Xr amd 8
+mounts. It might be good to change this to avoid clashes with
+.Xr hald 8 
+based mounting solutions.
+.Pp
+It is recommended to stop automounter before changing this setting, because a
+change would prevent automounter from cleaning up properly behind itself.
+.It lock="%%RUN%%/automounter.lock"
+A lock file that is used to prevent clashes between several instances of
+.Xr automounter 8 ,
+e.g. when there are several USB events at once.
+.Pp
+This takes immediate effect.
+.It mount_options=rw,noatime,noexec
+These are the default options given to mount when mounting a file system.
+.Pp
+This takes immediate effect.
+.It mountdir="%%RUN%%/automounter.mnt"
+A directory where
+.Xr automounter 8
+will create the mount points for amd.
+.Pp
+Like with linkdir it is required to stop automounter before changing mountdir
+to avoid an inconsistent state.
+.It nodes="%%RUN%%/automounter.nodes"
+This file is used to remember which mounts are currently managed by
+.Xr automounter 8 .
+.Pp
+It is required to stop automounter before changing nodes.
+.It oldnodes="%%RUN%%/automounter.nodes.old"
+A temporary file that is used to find out weather any mounts should be cleaned
+up.
+.Pp
+A change of oldnodes takes immediate effect.
+.It timeout=10
+The time out for aquiring the lock. If the time out passes without gaining
+the lock the instance of
+.Xr automounter 8
+is skipped.
+.Pp
+Changing the timeout takes immediate effect.
+.It update_delay=1
+The time that automounter waits for camcontrol and atacontrol to catch up
+with recent changes, when the script has been called with the update parameter.
+.Pp
+This setting takes immediate effect.
+.El
+.Sh FILE SYSTEM SPECIFIC SETTINGS
+It is possible to influence the
+.Fl t
+and
+.Fl o
+parameters given to the mount command for each supported file system type.
+.Pp
+The parameter
+.Fl t
+defaults to the identified file system type. For optical drives the file system
+type does not match the mount type, hence iso9660=cd9660 is set by default.
+All mount types can be set similarly. The following example shows how
+to use ntfs-3g to mount ntfs file systems.
+.Bd -literal -offset indent
+ntfs=ntfs-3g
+.Ed
+.Pp
+The parameter
+.Fl o
+defaults to mount_options, but it can be set individually for each
+file system type. The following example will mount msdosfs file systems with
+UTF-8 encoded file names:
+.Bd -literal -offset indent
+msdosfs_options=$mount_options,-L=en_GB.UTF-8
+.Ed
+.Pp
+Changing these settings takes immediate effect.
+.Sh GELI
+This section describes all settings related to
+.Xr geli 8
+key polling and auto attaching. Automounter should be stopped before any of
+them are changed.
+.Pp
+New images and keys can be added any time. Images should not be removed while mounted.
+.Bl -tag -width indent
+.It geli=0
+By default all geli features are deactivated. To enable them this should be set
+to 1.
+.It geli_nodes="%%RUN%%/automounter.geli.nodes"
+A file that is used to remember the device as which images were attached and
+the key that was used for attaching.
+.It geli_oldnodes="%%RUN%%/automounter.geli.oldnodes"
+A temporary file that is used when removing stale attachments or adding new
+ones.
+.It geli_availablekeys="%%RUN%%/automounter.geli.keys"
+A file for remembering the keys that are currently available.
+.It geli_images="%%GELI_IMAGES%%"
+The directory where images and device links are located.
+.It geli_keys="%%GELI_KEYS%%"
+The directory on managed file systems to poll for keys.
+.El
+.Sh FILES
+.Bl -tag -width indent
+.It %%PREFIX%%/etc/automounter.conf
+.It %%PREFIX%%/etc/automounter.conf.sample
+.El
+.Sh SEE ALSO
+.Xr automounter 8 ,
+.Xr amd 8 ,
+.Xr mount 8 ,
+.Xr geli 8
+.Sh AUTHOR
+Dominic Fandrey <kamikaze@bsdforen.de>
