@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -97,12 +97,12 @@ bsda:obj:createClass bsda:messaging:Lock \
 #
 # @param 1
 #	The file to lock.
-# @return 1
-#	If one of the locks cannot be locked.
+# @return
+#	1 if the lock cannot be acquired.
 #
 bsda:messaging:Lock.init() {
 	$this.setLock "$1"
-	lockf -ks "$1" sh -c "test -n \"\$(cat '$1')\" || echo 0 > '$1'" || return 1
+	lockf -ks "$1" sh -c "test -n \"\$(cat '$1' 2> /dev/null)\" || echo 0 > '$1'; chmod 0600 '$1'" || return 1
 }
 
 #
@@ -231,7 +231,7 @@ bsda:obj:createClass bsda:messaging:FileSystemListener \
 #	1 if creating a locking object fails
 #
 bsda:messaging:FileSystemListener.init() {
-	lockf -ks "$1" true || return 1
+	lockf -ks "$1" chmod 0600 "$1" || return 1
 	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
 	setvar ${this}queue "$1"
 	setvar ${this}position 0
@@ -373,7 +373,7 @@ bsda:obj:createClass bsda:messaging:FileSystemSender \
 #	1 if creating a locking object fails
 #
 bsda:messaging:FileSystemSender.init() {
-	lockf -ks "$1" true || return 1
+	lockf -ks "$1" chmod 0600 "$1" || return 1
 	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
 	setvar ${this}queue "$1"
 }

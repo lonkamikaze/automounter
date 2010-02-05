@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 1.11
+# version 1.12
 
 # Include once.
 test -n "$bsda_obj" && return 0
@@ -65,6 +65,7 @@ bsda_obj=1
 # bsda:obj:deserialize()
 # bsda:obj:isObject()
 # bsda:obj:isInt()
+# bsda:obj:isUInt()
 # bsda:obj:isFloat()
 # bsda:obj:isSimpleFloat()
 # bsda:obj:createMethods()
@@ -552,6 +553,7 @@ bsda_obj=1
 # below:
 #	bsda:obj:isObject()
 #	bsda:obj:isInt()
+#	bsda:obj:isUInt()
 #	bsda:obj:isFloat()
 #	bsda:obj:isSimpleFloat()
 #
@@ -1607,6 +1609,18 @@ bsda:obj:isObject() {
 #
 bsda:obj:isInt() {
 	echo "$1" | grep -qExe "(-|\+)?[0-9]+"
+}
+
+#
+# Checks whether the given parameter is an unsigned integer.
+#
+# @param 1
+#	The parameter to check.
+# @return
+#	0 for unsigned integers, 1 for everything else.
+#
+bsda:obj:isUInt() {
+	echo "$1" | grep -qExe "\+?[0-9]+"
 }
 
 #

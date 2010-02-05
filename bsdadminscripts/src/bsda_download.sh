@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -42,11 +42,10 @@ bsda_download=1
 #
 # The location that servers use to create message queues in.
 #
-: ${bsda_download_tmp="/tmp/$0.$$"}
+: ${bsda_download_tmp="/tmp"}
 
 #
-# This class represents a download manager. It should not be used directly,
-# but be dispatched by a bsda:download:Control instance.
+# This class represents a download manager.
 #
 bsda:obj:createClass bsda:download:Manager \
 	implements:bsda:scheduler:Process \
@@ -56,11 +55,15 @@ bsda:obj:createClass bsda:download:Manager \
 		"The servers to work with." \
 	w:private:controllerPID \
 		"The process to watch. If this process dies so should the" \
-		"download manager." \
+		"background download manager." \
+	w:private:downloaderPID \
+		"The PID of the background downloading process." \
 	i:private:init \
 		"The constructor." \
 	c:private:clean \
 		"The destructor." \
+
+#TODO: Download interface
 
 #
 # The constructor forks away the background downloading process and offers
@@ -68,22 +71,58 @@ bsda:obj:createClass bsda:download:Manager \
 #
 # @param 1
 #	A Servers instance, which is used for downloading.
+# @param 2
+#	An optional process ID the background downloader should watch.
 # @return
 #	1 if the parameter 1 is not a bsda:download:Servers instance.
 #
 bsda:download:Manager.init() {
-	# Remember this process ID, it's required for the background
-	# downloader to terminate if the master process dies.
-	# It is also required by the job method to decide whether it's called
-	# in the background process or in the controlling process.
-	setvar ${this}controllerPID $$
-
 	# The servers list.
 	bsda:download:Servers.isInstance "$1" || return 1
 	setvar ${this}servers $1
 
-	#TODO: fork away the background downloader, probably write a
-	# static method for this.
+	# Remember controller process ID, it's required for the background
+	# downloader to terminate if the master process dies.
+	if bsda:obj:isUInt "$2"; then
+		setvar ${this}controllerPID $2
+	fi
+
+	# Fork away the background downloader.
+	bsda:download:Manager.downloader &
+	setvar ${this}downloaderPID $!
+}
+
+bsda:download:Manager.clean() {
+	#TODO Clean up server objects.
+}
+
+bsda:download:Manager.downloader() {
+	local scheduler sleeper
+
+	# Create a scheduler for the jobs.
+	bsda:scheduler:RoundTripScheduler scheduler
+
+	# Create a sleeper job.
+	bsda:scheduler:Sleep sleeper 0.5
+
+	# Register initial jobs.
+	$scheduler.register $sleeper
+	$scheduler.register $this
+
+	# Cede control to the scheduler.
+	$scheduler.run
+
+	# The scheduler has terminated, so clean up.
+	$scheduler.delete
+	$sleeper.delete
+	$this.delete
+}
+
+bsda:download:Manager.run() {
+	#TODO
+}
+
+bsda:download:Manager.stop() {
 }
 
 #
@@ -132,7 +171,6 @@ bsda:download:Server.init() {
 	bsda:obj:isInt "${2:-1}" && [ "${2:-1}" -gt "0" ] || return 1
 	$this.setFree "${2:-1}"
 	$this.setDownloads
-	mkdir -p "$bsda_download_tmp" || return 2
 	bsda:messaging:FileSystemListener ${this}listener "$bsda_download_tmp/$this" || return 2
 	bsda:messaging:FileSystemSender ${this}sender "$bsda_download_tmp/$this" || return 2
 }
@@ -155,6 +193,7 @@ bsda:download:Server.clean() {
 	$sender.delete
 	# Also delete the queue.
 	$listener.delete 1
+	return 0
 }
 
 #
