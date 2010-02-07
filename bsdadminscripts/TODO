@@ -1,3 +1,4 @@
 * Set UPGRADE_PORT=1 during pkg_delete and pkg_add
 * Set UPGRADE_TOOL to pkg_upgrade
 * Find a way to operate without mirrors.
+* use printf "\033]2;%s\007" "TITLE" and find a way to undo this

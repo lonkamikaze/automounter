@@ -94,6 +94,7 @@ bsda:download:Manager.init() {
 
 bsda:download:Manager.clean() {
 	#TODO Clean up server objects.
+	return
 }
 
 bsda:download:Manager.downloader() {
@@ -120,9 +121,11 @@ bsda:download:Manager.downloader() {
 
 bsda:download:Manager.run() {
 	#TODO
+	return
 }
 
 bsda:download:Manager.stop() {
+	return
 }
 
 #
@@ -653,6 +656,7 @@ bsda:download:Job.run() {
 # This is required by the bsda:scheduler:Process interface and does nothing.
 #
 bsda:download:Job.stop() {
+	return
 }
 
 #
