@@ -4,6 +4,7 @@ bsda:pkg:Index index /var/db/uma/FTPINDEX $moved
 $index.identifyPackages pkgs '*'
 for pkgname in $(pkg_info -qoa | head -n 100); {
 	$index.identifyPackages pkg "$pkgname"
+	$pkg.getOrigin
 }
 #echo half
 #for pkgname in $(pkg_info -qoa); {

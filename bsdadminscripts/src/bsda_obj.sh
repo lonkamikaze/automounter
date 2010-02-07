@@ -800,7 +800,7 @@ bsda:obj:createClass() {
 	superClean=
 
 	# Parse arguments.
-	for arg {
+	for arg in "$@"; {
 		case "$arg" in
 			x:*)
 				methods="$methods${methods:+$IFS}${arg#x:}"
@@ -1235,6 +1235,7 @@ bsda:obj:createClass() {
 			${superInit:+local class}
 			${superInit:+class=$superInitParent}
 			${superInit:+$superInit \"\$@\"}
+			${superInit:-return}
 		}
 	"
 
@@ -1245,6 +1246,7 @@ bsda:obj:createClass() {
 			${superClean:+local class}
 			${superClean:+class=$superCleanParent}
 			${superClean:+$superClean \"\$@\"}
+			${superClean:-return}
 		}
 	"
 
@@ -1426,7 +1428,7 @@ bsda:obj:createInterface() {
 	extends=
 
 	# Parse arguments.
-	for arg {
+	for arg in "$@"; {
 		case "$arg" in
 			x:*)
 				methods="$methods${methods:+$IFS}public:${arg#x:}"
@@ -1860,4 +1862,15 @@ bsda:obj:callerSetvar() {
 	# Register variable.
 	eval "${caller}_setvars=\$${caller}_setvars\${${caller}_setvars:+ }$1"
 }
+
+#
+# Compatibility hacks.
+#
+
+# Emulate setvar for terminals that don't have it.
+if ! setvar 2> /dev/null; then
+	setvar() {
+		eval "$1=\"$2\""
+	}
+fi
 
