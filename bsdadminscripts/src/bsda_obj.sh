@@ -1765,8 +1765,9 @@ bsda:obj:createMethods() {
 		eval "
 			$3.$method() {
 				$scope
+				local caller
 				bsda:obj:callerSetup
-				local class this caller _return
+				local class this _return
 				class=$1
 				this=$3
 				$1.$method \"\$@\"
