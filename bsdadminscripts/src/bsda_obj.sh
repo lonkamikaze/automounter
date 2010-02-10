@@ -58,6 +58,10 @@ bsda_obj=1
 # 10) SERIALIZE
 # 10.1) Serializing
 # 10.2) Deserializing
+# 11) COMPATIBILITY
+# 11.1) bash - local
+# 11.2) bash - setvar
+# 11.3) bash - Command Substitution Variable Scope
 # bsda:obj:createClass()
 # bsda:obj:createInterface()
 # bsda:obj:getVar()
@@ -158,9 +162,9 @@ bsda_obj=1
 #		setvar ${this}z "$4"
 #	}
 #
-# This example shows that to overload methods they have to be stated in the
-# class declaration. If init had not been stated, the init method of the
-# parent class MyConstPoint2D would have been used.
+# The init method is explicitely stated in the class declaration just for the
+# sake of readability, though not a requirement for overloading inherited
+# methods, this is considered good style.
 #
 # NOTE: If the init method does not return 0 the object is instantly
 #	destroyed and the return value forwarded to the caller.
@@ -187,11 +191,10 @@ bsda_obj=1
 # 	This scope allows access from anywhere.
 # protected:
 #	The protected scope allows classes that are derived from the
-#	current class or reside within the same namespace access,
-#	in addition to the private permissions.
+#	current class, parents of the corrunt class or reside within
+#	the same namespace access.
 # private:
-#	Only instances of the same class and the classes being extended
-#	have access.
+#	Only instances of the same class have access.
 #
 # Namespaces are colon (the character ":") seperated. E.g. the class
 # bsda:pkg:Index has the namespace "bsd:pkg".
@@ -262,7 +265,7 @@ bsda_obj=1
 #
 # 2) IMPLEMENTING METHODS
 #
-# All that requires to be done to get a functional class after defining it,
+# All that remains to be done to get a functional class after defining it,
 # is to implement the required methods.
 # Methods are really just functions that the constructor
 # creates a wrapper for that forwards the object reference to them.
@@ -612,6 +615,46 @@ bsda_obj=1
 #
 
 #
+# 11) COMPATIBILITY
+#
+# This framework was written for the bourne shell clone, provided with the
+# FreeBSD operating system. To open it up to a wider audience it was made
+# compatible to the bourne again shell (bash) version 4, though it is
+# likely to work with earlier releases to.
+# The serialization relies on external commands that might not be present
+# everywhere, namely xxd(1) and rs(1).
+#
+# Compatibilty hacks can be found at the very end of the file. This chapter
+# describes some of the differences between FreeBSD sh and bash that one
+# might have to keep in mind when implementing classes with this framework.
+#
+# 11.1) bash - local
+#
+# The local command of bash destroys the original variable values when
+# declaring a variable local. Most notably that broke scope checks.
+# A simple workaround was to move the local decleration behind the scope
+# checks in the code.
+#
+# 11.2) bash - setvar
+#
+# The bash doesn't have a setvar command. A hack was introduced to circumvent
+# this.
+#
+# 11.3) bash - Command Substitution Variable Scope
+#
+# Variable changes inside command substition are lost outside the scope of the
+# substition, when using bash. The FreeBSD sh performs command substitution in
+# the same variable scope, which sometimes can be used for elegant solutions,
+# where bash compatibility requires the use of additional temporary variables.
+#
+# The following code will output "ab" when executed by FreeBSD-sh and "aa"
+# when executed with bash:
+#
+#	test=a
+#	echo $test$(test=b)$test
+#
+
+#
 # The stack counter that holds the number of methods that currently
 # use the return stack.
 #
@@ -771,7 +814,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 bsda:obj:createClass() {
 	local IFS class methods method attributes getters setters arg
 	local getter setter attribute reference init clean serialize extends
-	local implements bsda_obj_namespace
+	local implements
 	local namespacePrefix classPrefix prefix
 	local superInit superClean superInitParent superCleanParent
 	local inheritedAttributes inheritedMethods parent parents
@@ -901,7 +944,9 @@ bsda:obj:createClass() {
 	}
 
 	# Add implicit public scope to methods.
-	for method in $methods$(methods=); {
+	method="$methods"
+	methods=
+	for method in $method; {
 		# Check the scope.
 		case "${method%:*}" in
 			$method)
@@ -1044,21 +1089,43 @@ bsda:obj:createClass() {
 	# Add the last method (this never happens in the loop).
 	methods="${methods:+$methods${previousMethod:+$IFS$scope:$previousMethod}}"
 
+	#
 	# Store access scope checks for each scope in the class context.
 	# Note that at the time this is run the variables class and this
 	# still belong to the the caller.
+	# These definitions are repeatedly subject to eval calls, hence
+	# the different escape depth which makes sure the variables
+	# are resolved at the right stage. This does not seem to be working
+	# with bash.
+	#
+
+	# Private methods allow the following kinds of access:
+	# - Same class
+	#   Access is allowed by all objects with the same class.
+	#   This excludes inheriting classes.
 	setvar ${classPrefix}private "
-		if [ \\\"\\\$class\\\" != \\\"$class\\\" ] && (! echo \\\"\\\$class\\\" | grep -Fx '$extends' > /dev/null); then
+		if [ \\\"\\\$class\\\" != \\\"$class\\\" ]; then
 			echo \\\"$class.\${method##*:}(): Terminated because of access attempt to a private method\\\${class:+ by \\\$class}!\\\" 1>&2
 			return 255
 		fi
 	"
+	# Protected methods allow the following kinds of access:
+	# - Derived classes
+	#   Access is allowed to instances of the same class and its
+	#   decendants.
+	# - Parent classes
+	#   Access is permitted to all parent classes.
+	# - Namespace
+	#   Access is allowed from the same namespace or subspaces of the
+	#   own namespace. Classes without a namespace cannot access each
+	#   other this way.
 	setvar ${classPrefix}protected "
 		if (! $class.isInstance \\\$this) && (! echo \\\"\\\$class\\\" | grep -Fx '$extends' > /dev/null) && [ \\\"\\\${class#${class%:*}}\\\" = \\\"\\\$class\\\" ]; then
 			echo \\\"$class.\${method##*:}(): Terminated because of access attempt to a protected method\\\${class:+ by \\\$class}!\\\" 1>&2
 			return 255
 		fi
 	"
+	# Public methods allow unchecked access.
 	setvar ${classPrefix}public ''
 
 	# Create constructor.
@@ -1697,10 +1764,9 @@ bsda:obj:createMethods() {
 		method=${method##*:}
 		eval "
 			$3.$method() {
-				local class this caller _return
-				# Check access permission.
 				$scope
 				bsda:obj:callerSetup
+				local class this caller _return
 				class=$1
 				this=$3
 				$1.$method \"\$@\"
@@ -1811,7 +1877,7 @@ bsda:obj:callerSetup() {
 #	The caller context prefix.
 # @param ${caller}_setvars
 #	The list of variables to copy into the caller context.
-# @param ${this}_callStackCount
+# @param bsda_obj_callStackCount
 #	Is decremented by 1.
 #
 bsda:obj:callerFinish() {
@@ -1867,10 +1933,10 @@ bsda:obj:callerSetvar() {
 # Compatibility hacks.
 #
 
-# Emulate setvar for terminals that don't have it.
+# Emulate setvar for shells that don't have it, i.e. bash.
 if ! setvar 2> /dev/null; then
 	setvar() {
-		eval "$1=\"$2\""
+		eval "$1=\"\$2\""
 	}
 fi
 
