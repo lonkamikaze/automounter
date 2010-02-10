@@ -53,6 +53,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"An instance of bsda:scheduler:Scheduler." \
 	w:private:servers \
 		"The servers to work with." \
+	w:private:messenger \
+		"The messenger for both processes." \
 	w:private:controllerPID \
 		"The process to watch. If this process dies so should the" \
 		"background download manager." \
@@ -62,6 +64,13 @@ bsda:obj:createClass bsda:download:Manager \
 		"The constructor." \
 	c:private:clean \
 		"The destructor." \
+	x:private:downloader \
+		"Forked off by the constructor to create the downloader" \
+		"process." \
+	x:private:runDownloader \
+		"Called by the run method in the downloader context." \
+	x:private:runController \
+		"Called by the run method in the controller context." \
 
 #TODO: Download interface
 
@@ -87,18 +96,21 @@ bsda:download:Manager.init() {
 		setvar ${this}controllerPID $2
 	fi
 
+	# Create a message queue.
+	bsda:messaging:FileSystemMessenger ${this}messenger "$bsda_download_tmp/$this"
+
 	# Fork away the background downloader.
-	bsda:download:Manager.downloader &
+	$this.downloader &
 	setvar ${this}downloaderPID $!
 }
 
 bsda:download:Manager.clean() {
-	#TODO Clean up server objects.
 	return
 }
 
+#static
 bsda:download:Manager.downloader() {
-	local scheduler sleeper
+	local scheduler sleeper servers messenger
 
 	# Create a scheduler for the jobs.
 	bsda:scheduler:RoundTripScheduler scheduler
@@ -114,13 +126,32 @@ bsda:download:Manager.downloader() {
 	$scheduler.run
 
 	# The scheduler has terminated, so clean up.
+	$this.getServers servers
+	$servers.delete 1
+	$this.getMesssenger messenger
+	$messenger.delete 1
 	$scheduler.delete
 	$sleeper.delete
 	$this.delete
 }
 
 bsda:download:Manager.run() {
-	#TODO
+	local downloaderPID
+
+	$this.getDownloaderPID downloaderPID
+
+	if [ "$$" = "$downloaderPID" ]; then
+		$this.runDownloader
+	else
+		$this.runController
+	fi
+}
+
+bsda:download:Manager.runController() {
+	return
+}
+
+bsda:download:Manager.runDownloader() {
 	return
 }
 
@@ -434,11 +465,12 @@ bsda:download:Servers.clean() {
 	local IFS mirror
 
 	# Return if the servers are not to be deleted.
-	test -z "$1" && return
+	test -z "$1" && return 0
 
 	for mirror in $($this.getMirrors); {
 		$mirror.delete
 	}
+	return 0
 }
 
 #
