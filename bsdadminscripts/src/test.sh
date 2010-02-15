@@ -1,4 +1,6 @@
+#!/bin/sh -f
 . bsda_pkg.sh
+echo "interpreter: $bsda_obj_interpreter"
 bsda:pkg:Moved moved /var/db/uma/FTPMOVED
 bsda:pkg:Index index /var/db/uma/FTPINDEX $moved
 $index.identifyPackages pkgs '*'

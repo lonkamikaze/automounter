@@ -44,6 +44,10 @@ bsda_download=1
 #
 : ${bsda_download_tmp="/tmp"}
 
+
+# Define messages.
+readonly bsda_download_MSG_TERM=0
+
 #
 # This class represents a download manager.
 #
@@ -140,7 +144,7 @@ bsda:download:Manager.run() {
 
 	$this.getDownloaderPID downloaderPID
 
-	if [ "$$" = "$downloaderPID" ]; then
+	if [ -z "$downloaderPID" ]; then
 		$this.runDownloader
 	else
 		$this.runController
@@ -152,7 +156,24 @@ bsda:download:Manager.runController() {
 }
 
 bsda:download:Manager.runDownloader() {
-	return
+	local IFS messenger line lines count object scheduler
+
+	IFS='
+'
+
+	$this.getScheduler scheduler
+	$this.getMesssenger messenger
+	$messenger.receive lines count
+	for line in $lines; {
+		# Deserialize objects.
+		bsda:obj:deserialize object "$line"
+
+		# Queue jobs.
+		if bsda:download:Job.isInstance "$object"; then
+			$scheduler.register "$object"
+		fi
+		
+	}
 }
 
 bsda:download:Manager.stop() {
