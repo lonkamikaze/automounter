@@ -102,7 +102,7 @@ bsda:obj:createClass bsda:messaging:Lock \
 #
 bsda:messaging:Lock.init() {
 	$this.setLock "$1"
-	lockf -ks "$1" sh -c "test -n \"\$(cat '$1' 2> /dev/null)\" || echo 0 > '$1'; chmod 0600 '$1'" || return 1
+	lockf -ks "$1" $bsda_obj_interpreter -c "test -n \"\$(cat '$1' 2> /dev/null)\" || echo 0 > '$1'; chmod 0600 '$1'" || return 1
 }
 
 #
@@ -112,7 +112,7 @@ bsda:messaging:Lock.clean() {
 	local lock
 	$this.getLock lock
 
-	lockf -k "$lock" sh -c "
+	lockf -k "$lock" $bsda_obj_interpreter -c "
 		lock=\"\$(cat '$lock')\"
 		test \${lock:-0} -eq 0 && rm '$lock'
 	"
@@ -131,7 +131,7 @@ bsda:messaging:Lock.lockRead() {
 	# run until the lock is acquired.
 	while true; do
 		# Get a file system lock on the lock file.
-		lockf -k "$lock" sh -c "
+		lockf -k "$lock" $bsda_obj_interpreter -c "
 			lock=\"\$(cat '$lock')\"
 			if [ \${lock:-0} -eq 0 ]; then
 				echo -1 > '$lock'
@@ -156,7 +156,7 @@ bsda:messaging:Lock.unlockRead() {
 	$this.getLock lock
 
 	# Get a file system lock on the lock file.
-	lockf -k "$lock" sh -c "echo 0 > '$lock'" && return 0
+	lockf -k "$lock" $bsda_obj_interpreter -c "echo 0 > '$lock'" && return 0
 }
 
 #
@@ -175,7 +175,7 @@ bsda:messaging:Lock.lockWrite() {
 	# run until the lock is acquired.
 	while true; do
 		# Get a file system lock on the lock file.
-		lockf -k "$lock" sh -c "
+		lockf -k "$lock" $bsda_obj_interpreter -c "
 			lock=\"\$(cat '$lock')\"
 			if [ \${lock:-0} -ge 0 ]; then
 				echo \$((\${lock:-0} + 1)) > '$lock'
@@ -201,7 +201,7 @@ bsda:messaging:Lock.unlockWrite() {
 	$this.getLock lock
 
 	# Get a file system lock on the lock file.
-	lockf -k "$lock" sh -c "echo \$((\$(cat '$lock') - 1)) > '$lock'"
+	lockf -k "$lock" $bsda_obj_interpreter -c "echo \$((\$(cat '$lock') - 1)) > '$lock'"
 }
 
 
