@@ -739,7 +739,8 @@ readonly bsda_obj_interpreter="$(ps -o command -p $$ | tail -n1 | sed "s, $0${*:
 #	protected
 #	public
 #
-# The following session and process bound static attributes are reserved:
+# The following session, class and process bound static attributes are
+# reserved:
 #	nextId
 #
 # @param 1
@@ -772,7 +773,7 @@ readonly bsda_obj_interpreter="$(ps -o command -p $$ | tail -n1 | sed "s, $0${*:
 #		   supplied.
 #
 #		   The superInit() and superClean() methods also call
-#		   the the first encountered init and clean methods.
+#		   the first encountered init and clean methods.
 #		implements:
 #		   This prefix is followed by the name of an interfaces.
 #		   Interfaces define public methods that need to be implemented
@@ -849,7 +850,7 @@ bsda:obj:createClass() {
 	superClean=
 
 	# Parse arguments.
-	for arg in "$@"; {
+	for arg in "$@"; do
 		case "$arg" in
 			x:*)
 				methods="$methods${methods:+$IFS}${arg#x:}"
@@ -892,7 +893,7 @@ bsda:obj:createClass() {
 				# Assume everything else is a comment.
 			;;
 		esac
-	}
+	done
 
 	# Create reference prefix. The Process id is added to the prefix when
 	# an object is created.
@@ -904,7 +905,7 @@ bsda:obj:createClass() {
 	setvar ${classPrefix}instancePatterns "${classPrefix}[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_"
 
 	# Create getters.
-	for method in $getters; {
+	for method in $getters; do
 		getter="${method##*:}"
 		attribute="$getter"
 		getter="get$(echo "${getter%%${getter#?}}" | tr '[:lower:]' '[:upper:]')${getter#?}"
@@ -926,10 +927,10 @@ bsda:obj:createClass() {
 		fi
 		# Add the getter to the list of methods.
 		methods="$methods${methods:+$IFS}${getter}"
-	}
+	done
 
 	# Create setters.
-	for method in $setters; {
+	for method in $setters; do
 		setter="${method##*:}"
 		attribute="$setter"
 		setter="set$(echo "${setter%%${setter#?}}" | tr '[:lower:]' '[:upper:]')${setter#?}"
@@ -947,12 +948,12 @@ bsda:obj:createClass() {
 		fi
 		# Add the setter to the list of methods.
 		methods="$methods${methods:+$IFS}$setter"
-	}
+	done
 
 	# Add implicit public scope to methods.
 	method="$methods"
 	methods=
-	for method in $method; {
+	for method in $method; do
 		# Check the scope.
 		case "${method%:*}" in
 			$method)
@@ -969,12 +970,12 @@ bsda:obj:createClass() {
 				return 3
 			;;
 		esac
-	}
+	done
 
 	# Manage inheritance.
 	superInit=
 	superClean=
-	for parent in $extends; {
+	for parent in $extends; do
 		if ! $parent.isClass; then
 			echo "bsda:obj:createClasss: ERROR: Extending \"$parent\" failed, not a class!" 1>&2
 			return 4
@@ -1011,7 +1012,7 @@ bsda:obj:createClass() {
 		attributes="$inheritedAttributes${inheritedAttributes:+${attributes:+$IFS}}$attributes"
 
 		# Create aliases for methods.
-		for method in $inheritedMethods; {
+		for method in $inheritedMethods; do
 			# Check whether this method already exists with a
 			# different scope.
 			if echo "$methods" | grep -qx ".*:${method##*:}"; then
@@ -1021,17 +1022,17 @@ bsda:obj:createClass() {
 
 			# Inherit method.
 			alias $class.${method##*:}=$parent.${method##*:}
-		}
+		done
 
 		# Update the list of methods.
 		methods="$inheritedMethods${inheritedMethods:+${methods:+$IFS}}$methods"
 
 		# Update the instance match patterns of parents.
-		for parent in $parent${parents:+$IFS$parents}; {
+		for parent in $parent${parents:+$IFS$parents}; do
 			$parent.getPrefix parent
 			eval "${parent}instancePatterns=\"\${${parent}instancePatterns}|\${${classPrefix}instancePatterns}\""
-		}
-	}
+		done
+	done
 
 
 	# Get the super methods, first class wins.
@@ -1039,7 +1040,7 @@ bsda:obj:createClass() {
 	test -z "$clean" -a -n "$superClean" && clean="$class.superClean"
 
 	# Manage implements.
-	for interface in $implements; {
+	for interface in $implements; do
 		if ! $interface.isInterface; then
 			echo "bsda:obj:createClasss: ERROR: Implementing \"$interface\" failed, not an interface!" 1>&2
 			return 5
@@ -1058,17 +1059,17 @@ bsda:obj:createClass() {
 		methods="$inheritedMethods${inheritedMethods:+${methods:+$IFS}}$methods"
 
 		# Update the instance match patterns of parents.
-		for parent in $interface${parents:+$IFS$parents}; {
+		for parent in $interface${parents:+$IFS$parents}; do
 			$interface.getPrefix parent
 			eval "${parent}instancePatterns=\"\${${parent}instancePatterns:+\${${parent}instancePatterns}|}\${${classPrefix}instancePatterns}\""
-		}
-	}
+		done
+	done
 
 	# If a method is defined more than once, the widest scope wins.
 	# Go through the methods sorted by method name.
 	previousMethod=
 	scope=
-	for method in $(methods=; echo "$methods" | sort -t: -k2); {
+	for method in $(methods=; echo "$methods" | sort -t: -k2); do
 		# Check whether the previous and the current method were the
 		# same.
 		if [ "$previousMethod" != "${method##*:}" ]; then
@@ -1091,7 +1092,7 @@ bsda:obj:createClass() {
 		fi
 
 		previousMethod="${method##*:}"
-	}
+	done
 	# Add the last method (this never happens in the loop).
 	methods="${methods:+$methods${previousMethod:+$IFS$scope:$previousMethod}}"
 
@@ -1220,9 +1221,9 @@ bsda:obj:createClass() {
 
 			# For each attribute copy the value over to the
 			# new object.
-			for attribute in \$(echo \"$attributes\"); {
+			for attribute in \$(echo \"$attributes\"); do
 				eval \"\$reference\$attribute=\\\"\\\$\${this}\$attribute\\\"\"
-			}
+			done
 		}
 	"
 
@@ -1235,11 +1236,11 @@ bsda:obj:createClass() {
 '
 
 			serialized=
-			for attribute in \$(echo '$attributes'); {
+			for attribute in \$(echo '$attributes'); do
 				serialized=\"\${serialized:+\$serialized;}\${this}\$attribute='\$(
 					eval \"printf '%s' \\\"\\\${\${this}\$attribute}\\\"\" | xxd -p | rs -T
 				)'\"
-			}
+			done
 			serialized=\"\$serialized;$class.deserialize \$this\"
 
 			\$caller.setvar \"\$1\" \"\$serialized\"
@@ -1274,15 +1275,15 @@ bsda:obj:createClass() {
 			# Create a list of all referenced objects.
 			objects=\"\$(
 				# Echo each attribute.
-				for attribute in \$(echo '$attributes'); {
+				for attribute in \$(echo '$attributes'); do
 					eval \"echo \\\"\\\${\$this\$attribute}\\\"\"
-				} | grep -Eo '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | sort -u
+				done | grep -Eo '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | sort -u
 			)\"
 
 			# Serialize all required objects.
-			for object in \$objects; {
+			for object in \$objects; do
 				\$object.serializeDeep
-			}
+			done
 
 			# Serialize this.
 			\$this.serialize serialized
@@ -1335,11 +1336,11 @@ bsda:obj:createClass() {
 			$bsda_obj_namespace:createMethods $class $classPrefix \$1 \"$methods\"
 
 			# Deserialize attributes.
-			for attribute in \$(echo '$attributes'); {
+			for attribute in \$(echo '$attributes'); do
 				setvar \"\$1\$attribute\" \"\$(
 					eval \"echo \\\"\\\${\$1\$attribute}\\\"\" | rs -T | xxd -r -p
 				)\"
-			}
+			done
 		}
 	"
 
@@ -1459,7 +1460,7 @@ bsda:obj:createClass() {
 #	instancePatterns
 #
 # @param 1
-#	The first parameter is the name of the class.
+#	The first parameter is the name of the interface.
 # @param @
 #	A description of the interface to create.
 #
@@ -1483,7 +1484,7 @@ bsda:obj:createClass() {
 #	1 for an attempt to extend something that is not an interface
 #
 bsda:obj:createInterface() {
-	local IFS arg interface bsda_obj_namespace methods extends
+	local IFS arg interface methods extends
 	local interfacePrefix namespacePrefix parent parents
 	local inheritedMethods
 
@@ -1501,7 +1502,7 @@ bsda:obj:createInterface() {
 	extends=
 
 	# Parse arguments.
-	for arg in "$@"; {
+	for arg in "$@"; do
 		case "$arg" in
 			x:*)
 				methods="$methods${methods:+$IFS}public:${arg#x:}"
@@ -1513,7 +1514,7 @@ bsda:obj:createInterface() {
 				# Assume everything else is a comment.
 			;;
 		esac
-	}
+	done
 
 	# Create an interface prefix, this is required to access the instance
 	# matching patterns.
@@ -1521,7 +1522,7 @@ bsda:obj:createInterface() {
 	interfacePrefix="${namespacePrefix}$(echo "$interface" | tr ':' '_')_"
 
 	# Manage inheritance.
-	for parent in $extends; {
+	for parent in $extends; do
 		if ! $parent.isInterface; then
 			echo "bsda:obj:createInterface: ERROR: Extending \"$interface\" failed, not an interface!" 1>&2
 			return 1
@@ -1539,7 +1540,7 @@ bsda:obj:createInterface() {
 
 		# Update the list of methods.
 		methods="$inheritedMethods${inheritedMethods:+${methods:+$IFS}}$methods"
-	}
+	done
 
 	# A static type checker.
 	eval "
@@ -1762,7 +1763,7 @@ bsda:obj:isSimpleFloat() {
 #
 bsda:obj:createMethods() {
 	local method scope
-	for method in $4; {
+	for method in $4; do
 		scope=${method%:*}
 		eval "scope=\"\$$2$scope\""
 		# Add method name to scope.
@@ -1782,7 +1783,7 @@ bsda:obj:createMethods() {
 				return \$_return
 			}
 		"
-	}
+	done
 }
 
 #
@@ -1795,10 +1796,10 @@ bsda:obj:createMethods() {
 #
 bsda:obj:deleteMethods() {
 	local method
-	for method in $2; {
+	for method in $2; do
 		method=${method##*:}
 		unset -f "$1.$method"
-	}
+	done
 }
 
 #
@@ -1815,9 +1816,9 @@ bsda:obj:deleteMethods() {
 #
 bsda:obj:deleteAttributes() {
 	local attribute
-	for attribute in $2; {
+	for attribute in $2; do
 		unset "${1}$attribute"
-	}
+	done
 }
 
 #
@@ -1897,12 +1898,12 @@ bsda:obj:callerFinish() {
 	local _var IFS
 	IFS=' '
 	eval "_var=\"\$${caller}_setvars\""
-	for _var in $_var; {
+	for _var in $_var; do
 		# Copy variable.
 		eval "setvar $_var \"\$$caller$_var\""
 		# Delete variable from stack.
 		unset $caller$_var
-	}
+	done
 	# Delete list of variables from stack.
 	unset ${caller}_setvars
 }

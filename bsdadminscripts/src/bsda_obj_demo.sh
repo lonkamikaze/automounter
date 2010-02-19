@@ -12,7 +12,7 @@
 #
 
 # Import framework.
-. bsda_obj.sh
+. ${bsda_dir:-.}/bsda_obj.sh
 
 # Declare the class.
 bsda:obj:createClass Demo \

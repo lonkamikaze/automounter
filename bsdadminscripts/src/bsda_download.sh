@@ -27,13 +27,13 @@ test -n "$bsda_download" && return 0
 bsda_download=1
 
 # Include framework for object oriented shell scripting.
-. bsda_obj.sh
+. ${bsda_dir:-.}/bsda_obj.sh
 
 # Include scheduling library.
-. bsda_scheduler.sh
+. ${bsda_dir:-.}/bsda_scheduler.sh
 
 # Inlcude messaging library.
-. bsda_messaging.sh
+. ${bsda_dir:-.}/bsda_messaging.sh
 
 #
 # Offers classes to download files from a background download manager.
@@ -164,7 +164,7 @@ bsda:download:Manager.runDownloader() {
 	$this.getScheduler scheduler
 	$this.getMesssenger messenger
 	$messenger.receive lines count
-	for line in $lines; {
+	for line in $lines; do
 		# Deserialize objects.
 		bsda:obj:deserialize object "$line"
 
@@ -173,7 +173,7 @@ bsda:download:Manager.runDownloader() {
 			$scheduler.register "$object"
 		fi
 		
-	}
+	done
 }
 
 bsda:download:Manager.stop() {
@@ -238,9 +238,9 @@ bsda:download:Server.clean() {
 	local sender listener download
 
 	# Kill all downloads.
-	for download in $($this.getDownloads); {
+	for download in $($this.getDownloads); do
 		kill -TERM $download
-	}
+	done
 
 	# Delete sender and listener.
 	$this.getSender sender
@@ -363,7 +363,7 @@ bsda:download:Server.run() {
 
 	# Go through all messages.
 	completed=
-	for message in $messages; {
+	for message in $messages; do
 		# The message contains download, job, status and size.
 		eval "$message"
 
@@ -379,7 +379,7 @@ bsda:download:Server.run() {
 		else
 			$job.downloadFailed
 		fi
-	}
+	done
 
 	# Update the amount of free download slots.
 	$this.getFree free
@@ -488,9 +488,9 @@ bsda:download:Servers.clean() {
 	# Return if the servers are not to be deleted.
 	test -z "$1" && return 0
 
-	for mirror in $($this.getMirrors); {
+	for mirror in $($this.getMirrors); do
 		$mirror.delete
-	}
+	done
 	return 0
 }
 
@@ -525,7 +525,7 @@ bsda:download:Servers.popMirror() {
 
 	# Try to return a free mirror.
 	$this.getMirrors mirrors
-	for mirror in $mirrors; {
+	for mirror in $mirrors; do
 		if $mirror.isAvailable; then
 			# Return the mirror.
 			$caller.setvar "$1" "$mirror"
@@ -535,7 +535,7 @@ bsda:download:Servers.popMirror() {
 			# Terminate.
 			return 0
 		fi
-	}
+	done
 
 	# No mirror was available, return nothing.
 	$caller.setvar "$1"

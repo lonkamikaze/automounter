@@ -27,7 +27,7 @@ test -n "$bsda_pkg" && return 0
 bsda_pkg=1
 
 # Include framework for object oriented shell scripting.
-. bsda_obj.sh
+. ${bsda_dir:-.}/bsda_obj.sh
 
 #
 # Offers classes for package handling.
@@ -520,7 +520,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	# Collect available origins.
 	origins=
 	# Create packages.
-	for line in $lines; {
+	for line in $lines; do
 		# Create a new Package instance.
 		name="$(echo "$line" | cut -d\| -f$bsda_pkg_IDX_PKG,$bsda_pkg_IDX_ORIGIN)"
 		origin="${name##*|$prefix}"
@@ -533,7 +533,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 
 		# Collect available origins.
 		origins="$origins${origins:+$IFS}$origin"
-	}
+	done
 
 	# Store the newly created packages in the list of all packages.
 	$this.addPackages "$newPackages"
@@ -562,7 +562,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	# single chunk, which would benefit performance, because
 	# the original origin would be lost. This would break
 	# blacklisting.
-	for line in $lines; {
+	for line in $lines; do
 		oldorigin="$(echo "$line" | cut -d\| -f$bsda_pkg_MOV_OLDORIGIN,$bsda_pkg_MOV_NEWORIGIN)"
 		neworigin="${oldorigin##*|}"
 		oldorigin="${oldorigin%|*}"
@@ -589,7 +589,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 		# Remember the old origin to remove it from
 		# the list of missing packages.
 		origins="$origins${origins:+$IFS}$oldorigin"
-	}
+	done
 	
 
 	# Remove available origins from the list of missing origins.
@@ -639,9 +639,9 @@ bsda:pkg:Index.addPackages() {
 '
 
 	eval "${this}packages=\"\$${this}packages\${${this}packages:+\$IFS}$1\""
-	for pkg in $1; {
+	for pkg in $1; do
 		eval "${this}mappedPackages=\"\$${this}mappedPackages\${${this}mappedPackages:+\$IFS}|$($pkg.getOrigin)|$pkg\""
-	}
+	done
 }
 
 #
@@ -664,7 +664,7 @@ bsda:pkg:Index.getKnownPackages() {
 
 	# Fetch all available origins from the list of already existing
 	# packages.
-	for pkg in $($this.getMappedPackages | grep -F "$(echo "$3" | sed -e 's/^/|/1' -e 's/$/|/1')"); {
+	for pkg in $($this.getMappedPackages | grep -F "$(echo "$3" | sed -e 's/^/|/1' -e 's/$/|/1')"); do
 		# Fetch origin and Package instance from the mappedPackage line.
 		origin="${pkg%|*}"
 		origin="${origin#|}"
@@ -675,7 +675,7 @@ bsda:pkg:Index.getKnownPackages() {
 
 		# Add the current origin to the list of encountered origins.
 		origins="$origins${origins:+$IFS}$origin"
-	}
+	done
 
 	# Return the matched packages.
 	$caller.setvar "$1" "$packages"
@@ -735,7 +735,7 @@ bsda:pkg:File.getContents() {
 	conflicts=
 
 	# Process the +CONTENTS file in the tar archive line by line.
-	for line in $(tar -xOf "$file" '+CONTENTS'); {
+	for line in $(tar -xOf "$file" '+CONTENTS'); do
 		case "$line" in
 			@name\ *)
 				name="${line#@name }"
@@ -759,7 +759,7 @@ bsda:pkg:File.getContents() {
 			;;
 		esac
 
-	}
+	done
 
 	# Return values.
 	$caller.setvar "$1" "$name"

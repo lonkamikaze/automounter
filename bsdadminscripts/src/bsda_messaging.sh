@@ -27,7 +27,7 @@ test -n "$bsda_messaging" && return 0
 bsda_messaging=1
 
 # Include framework for object oriented shell scripting.
-. bsda_obj.sh
+. ${bsda_dir:-.}/bsda_obj.sh
 
 #
 # Offers classes to exchange character lines between processes.
