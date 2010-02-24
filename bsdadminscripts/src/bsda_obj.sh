@@ -686,7 +686,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # The interpreting shell command. This can be used when this information is
 # needed by other programs like lockf(1).
 #
-readonly bsda_obj_interpreter="$(ps -o command -p $$ | tail -n1 | sed "s, $0${*:+ $*}\$,,1")"
+readonly bsda_obj_interpreter="$(ps -o args= -p $$ | sed "s, $0${*:+ $*}\$,,1")"
 
 #
 # This is used as a buffer during deep serialization.

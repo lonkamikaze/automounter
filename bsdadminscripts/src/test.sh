@@ -1,5 +1,7 @@
 #!/bin/sh -f
+bsda_dir="${0%${0##*/}}"
 . ${bsda_dir:-.}/bsda_pkg.sh
+echo "dir: $bsda_dir"
 echo "interpreter: $bsda_obj_interpreter"
 bsda:pkg:Moved moved /var/db/uma/FTPMOVED
 bsda:pkg:Index index /var/db/uma/FTPINDEX $moved
