@@ -58,10 +58,15 @@ bsda_obj=1
 # 10) SERIALIZE
 # 10.1) Serializing
 # 10.2) Deserializing
-# 11) COMPATIBILITY
-# 11.1) bash - local
-# 11.2) bash - setvar
-# 11.3) bash - Command Substitution Variable Scope
+# 11) REFLECTION & REFACTORING
+# 11.1) Attributes
+# 11.2) Methods
+# 11.3) Parent Classes and Interfaces
+# 12) COMPATIBILITY
+# 12.1) POSIX
+# 12.2) bash - local
+# 12.3) bash - setvar
+# 12.4) bash - Command Substitution Variable Scope
 # bsda:obj:createClass()
 # bsda:obj:createInterface()
 # bsda:obj:getVar()
@@ -605,6 +610,11 @@ bsda_obj=1
 # After the last line the $configuration object can be used exactly like
 # in the previous session.
 #
+# Serialized data is executable shell code, so it can also be deserialized
+# by using the eval command:
+#
+#	eval "$(cat ~/.myconfig)"
+#
 # @param 1
 #	The name of the variable to store the object ID (reference) of the
 #	serialized object in.
@@ -615,12 +625,108 @@ bsda_obj=1
 #
 
 #
-# 11) COMPATIBILITY
+# 11) REFLECTION & REFACTORING
+#
+# The bsda:obj framework offers full reflection. Refactoring is not supported,
+# but possible to a limited degree.
+#
+# Internally the reflection support is required for realizing inheritance.
+# A new class tells all its parents "I'm one of yours" and takes all the
+# methods and attributes for itself.
+#
+# 11.1) Attributes
+#
+# Each class offers the static method getAttributes():
+#
+#	<classname>.getAttributes attributes
+#
+# The variable attributes then contains a list of all attributes an instance
+# of this class has. The list is newline separated.
+#
+# Every attribute of an instance can directly be accessed, bypassing the scope
+# checks (object is an instance of the class the list attributes was
+# determined from):
+#
+#	for attribute in $attributes; do
+#		echo $attribute:
+#		# Print the attribute value
+#		bsda:obj:getVar $object$attribute
+#	done
+#
+# 11.2) Methods
+#
+# Each class also offers the static method getMethods():
+#
+#	<classname>.getMethods methods
+#
+# The methods variable in the example then contains a list of methods in the
+# format:
+#
+#	("private" | "protected" | "public") + ":" + <methodname>
+#
+# The methods are newline separated.
+#
+# Every method can be overwritten, by redefining it. The access scope checks
+# remain the same. To access a private or protected method of an unrelated
+# object, the class and identity of the caller can be faked by rewriting the
+# class and this special variables:
+#
+#	# Preserve context
+#	local tmpThis tmpClass
+#	tmpThis="$this"
+#	tmpClass="$class"
+#
+#	# Call forbidden method
+#	this=$object
+#	class=<objectclass>
+#	$object.<methodname>
+#
+#	# Restore context
+#	this=$tmpThis
+#	class=$tmpClass
+#
+# 11.3) Parent Classes and Interfaces
+#
+# Each class knows its parents and interfaces and reveals them through the
+# static getParents() and getInterfaces() methods:
+#
+#	<classname>.getInterfaces interfaces
+#	<classname>.getParents parents
+#
+# The variables interfaces and parents contain newline separated lists of
+# interface and class names after the preceding commands.
+#
+# Though all classes know their parents, they do not know their children.
+# Instead there is a recognition pattern for object IDs belonging to the
+# class, which is used by the static isInstance() method for each class.
+#
+# Every inheriting/implementing class adds a pattern for itself to the
+# recognition pattern of each class and interface it extends and implements.
+# This pattern can be accessed through the class prefix:
+#
+#	<classname>.getPrefix prefix
+#	bsda:obj:getVar patterns ${prefix}instancePatterns
+#
+# The class prefix can also be used to access the code for the access scope
+# checks. This can be abused to deactivate theses checks for a certain class:
+#
+#	unset ${prefix}public ${prefix}protected ${prefix}private
+#
+
+#
+# 12) COMPATIBILITY
 #
 # This framework was written for the bourne shell clone, provided with the
-# FreeBSD operating system. To open it up to a wider audience it was made
-# compatible to the bourne again shell (bash) version 4, though it is
-# likely to work with earlier releases to.
+# FreeBSD operating system (a descendant of the Almquist shell). To open it
+# up to a wider audience it was made compatible to the bourne again shell
+# (bash) version 4, though it is likely to work with earlier releases, too.
+#
+# The performance of bash however is very bad (more than thrice the runtime
+# of FreeBSD's ASH derivate for the tested cases). Unfortunately the only
+# popular ASH derivate in the GNU world, dash, is not compatible.
+# Compatibility could be achieved, but the syntactical impact was deemed too
+# painful.
+#
 # The serialization relies on external commands that might not be present
 # everywhere, namely xxd(1) and rs(1).
 #
@@ -628,19 +734,57 @@ bsda_obj=1
 # describes some of the differences between FreeBSD sh and bash that one
 # might have to keep in mind when implementing classes with this framework.
 #
-# 11.1) bash - local
+# 12.1) POSIX
+#
+# The relatively strict POSIX conformance of dash is the reason that this
+# framework is not compatible to it. The specific reason why this framework
+# does not work with dash is the use of colon ':' and period '.' characters
+# in function and method names. POSIX only requires a shell to support
+# function names consisting of the character group [_[:alnum:]].
+# http://www.opengroup.org/onlinepubs/009695399/utilities/xcu_chap02.html#tag_02_09_05
+#
+# However it also states that a shell may allow other characters. The
+# resulting paradox is that supporting colons and periods in function names
+# is POSIX conformant, whereas using them isn't.
+#
+# One might argue that POSIX conformance should be the top priority to a
+# general purpose framework such as this one. An example for an object
+# oriented shell framework doing just that is Shoop, which originates from
+# the Debian project.
+# http://shoop.cvs.sourceforge.net/viewvc/shoop/shoop/docs/README?view=markup
+#
+# Shoop is a good example why POSIX support is only of secondary concern for
+# the bsda:obj development. Using Shoop neither feels like writing shell code
+# nor like using one of the popular OO languages.
+#
+# Preserving the shell scripting "feeling" and introducing similarities to
+# popular OO languages were the main syntactical goals for bsda:obj.
+# These goals were not compatible to the goal of full POSIX conformance and
+# took precendence.
+#
+# A good example why POSIX conformance is overrated is the local function.
+# POSIX neither requires nor defines it. Arguably large shell scripts
+# would become very tedious, considering that all variables would then
+# be global and their names would have to be chosen with extraordinary care.
+#
+# Even dash with its strict POSIX conformance knows the local builtin.
+# Considering that, one might argue it should add colon and period support for
+# function names as well, because the . and : builtin functions imply that
+# . and : are valid function names.
+#
+# 12.2) bash - local
 #
 # The local command of bash destroys the original variable values when
 # declaring a variable local. Most notably that broke scope checks.
 # A simple workaround was to move the local decleration behind the scope
 # checks in the code.
 #
-# 11.2) bash - setvar
+# 11.3) bash - setvar
 #
 # The bash doesn't have a setvar command. A hack was introduced to circumvent
 # this.
 #
-# 11.3) bash - Command Substitution Variable Scope
+# 12.4) bash - Command Substitution Variable Scope
 #
 # Variable changes inside command substition are lost outside the scope of the
 # substition, when using bash. The FreeBSD sh performs command substitution in
@@ -1642,18 +1786,19 @@ bsda:obj:getSerializedId() {
 # @param 1
 #	If there is a second parameter this is the name of the variable to
 #	store the object reference in. Otherwise this is the serialized string
-#	and the reference is be output to stdout.
+#	and the reference is output to stdout.
 # @param 2
 #	If given this is the serialized string and the object reference is
 #	saved in the variable named with the first parameter.
 #
 bsda:obj:deserialize() {
 	if [ "$2" = "-" ]; then
-		local stream
-		stream="$(cat)"
-		eval "$stream"
-		setvar "$1" "${stream##* }"
-	elif [ -n "$2" ]; then
+		set -- "$1" "$(cat)"
+	elif [ "$1" = "-" ]; then
+		set -- "$(cat)"
+	fi
+
+	if [ -n "$2" ]; then
 		eval "$2"
 		setvar "$1" "${2##* }"
 	else
