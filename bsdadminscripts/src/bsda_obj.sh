@@ -1426,7 +1426,8 @@ bsda:obj:createClass() {
 
 			# Serialize all required objects.
 			for object in \$objects; do
-				\$object.serializeDeep
+				\$object.serializeDeep 2> /dev/null \
+					|| echo \"$class.serializeDeep: WARNING: Missing object \\\"\$object\\\" referenced by \\\"\$this\\\"!\" 1>&2
 			done
 
 			# Serialize this.
@@ -1443,6 +1444,7 @@ bsda:obj:createClass() {
 				unset bsda_obj_serialized
 				unset bsda_obj_serializeBlacklist
 			fi
+			return 0
 		}
 	"
 
