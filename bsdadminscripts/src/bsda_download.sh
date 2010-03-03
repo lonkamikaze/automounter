@@ -77,6 +77,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"Called by the run method in the controller context." \
 	x:private:send \
 		"Sends data through the message queue." \
+	x:private:sendObject \
+		"Sends an object through the message queue." \
 	x:protected:propagate \
 		"Propagates changes in the caller to the partner process." \
 	x:public:createJob \
@@ -201,8 +203,14 @@ bsda:download:Manager.stop() {
 #
 # @param 1
 #	The message to send.
+# @return
+#	1 if the message is an object or serialized object.
+#	0 if everything is in order.
 #
 bsda:download:Manager.send() {
+	# Check whether this is not an object.
+	bsda:obj:isObject "${1##* }" && return 1
+
 	local messenger
 	$this.getMesssenger messenger
 
@@ -211,16 +219,34 @@ bsda:download:Manager.send() {
 		# Flush the message queue if necessary.
 		$this.run
 	done
+	return 0
+}
+
+bsda:download:Manager.sendObject() {
+	# Check whether this is an object.
+	bsda:obj:isObject "$1" || return 1
+
+	local messenger serialized
+	$this.getMesssenger messenger
+	$1.serialize serialized
+
+	# Try to send the message.
+	while ! $messenger.send "$serialized"; do
+		# Flush the message queue if necessary.
+		$this.run
+		# Reserialize in case the object was changed.
+		$1.serialize serialized
+	done
+	return 0
 }
 
 bsda:download:Manager.propagate() {
 	local object
 	# Serialize the caller.
 	$caller.getObject object
-	$object.serialize object
 
 	# Propagate the object to the partner process.
-	$this.send "$object"
+	$this.sendObject "$object"
 }
 
 #
@@ -242,13 +268,9 @@ bsda:download:Manager.createJob() {
 	# Return the job.
 	$caller.setvar $job
 
-	# Serialize servers and job.
-	$servers.serialize servers
-	$job.serialize job
-
 	# Dispatch the job.
-	$this.send "$servers"
-	$this.send "$job"
+	$this.sendObject $servers
+	$this.sendObject $job
 }
 
 #
