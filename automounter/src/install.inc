@@ -8,7 +8,7 @@ automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 
 for parameter; {
 	case "${parameter%%=*}" in
-		-prefix | -var | -run | -media | -devfs | -map | -amd | \
+		-prefix | -var | -run | -tmp | -media | -devfs | -map | -amd | \
 		-eli_images | -eli_keys)
 			value="${parameter#*=}"
 			parameter="${parameter%%=*}"
@@ -28,6 +28,7 @@ for parameter; {
 : ${prefix=/usr/local}
 : ${var=/var}
 : ${run=$var/run}
+: ${tmp=$var/tmp}
 : ${media=/media}
 : ${devfs=/dev}
 : ${map=/etc/amd.map}
@@ -39,6 +40,7 @@ replace="
 %%PREFIX%%,$prefix
 %%MAN%%,$prefix/man
 %%RUN%%,$run
+%%TMP%%,$tmp
 %%MEDIA%%,$media
 %%DEVFS%%,$devfs
 %%MAP%%,$map

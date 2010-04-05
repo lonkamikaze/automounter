@@ -49,8 +49,8 @@ Unless noted otherweise after changing any of these settings automounter has to
 be restarted. Failing to do so can result in an inconsistent state.
 .Bl -tag -width indent
 .It a="%%RUN%%/automounter.amd"
-.It c=2
-.It w=1
+.It c=10
+.It w=5
 .It l="%%RUN%%/automounter.amd.log"
 .It directory="%%RUN%%/automounter.amd.mnt"
 .It map="%%RUN%%/automounter.amd.map"
@@ -97,7 +97,7 @@ This setting takes immediate effect.
 Setting this to 1 will activate a bug workaround for fuse based file systems
 such as ntfs-3g from the sysutils/fusefs-ntfs port. Fuse closes all opened
 files when an unmount is attempted. With automounter this happens every
-second by default.
+five seconds by default.
 .Pp
 The workaround uses
 .Xr fstat 1
@@ -195,6 +195,14 @@ msdosfs_options=$mount_options,-L=en_GB.UTF-8
 .Ed
 .Pp
 Changing these settings takes immediate effect.
+.Pp
+Note that more recent versions of FreeBSD have the
+.Ar mountprog
+option, which makes the
+.Fl t
+parameter obsolete in most cases. Read
+.Xr mount 8
+for details.
 .Sh GELI
 This section describes all settings related to
 .Xr geli 8

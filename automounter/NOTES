@@ -1,8 +1,8 @@
-This release adds a default node blacklist to prevent the occurance of stale
-mounts from file system IDs, because these devices disappear after the first
-mount.
+This release adapts to the new behaviour of "glabel list" in RELENG_8.
+It also can deal with empty labels (that does not mean unlabeled devices)
+and has more verbose 'list' output.
 
-- automounter 1.3.5
+- automounter 1.3.6
 
  * Tested on FreeBSD 8.0-STABLE
  Please run 'man 8 automounter' and 'man 5 automounter.conf' for introductions.

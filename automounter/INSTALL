@@ -16,6 +16,10 @@ following way: -parameter=value
 		The directory where runtime information like the dynamically
 		stored amd.map or PID files will be created.
 
+	-tmp=/var/tmp
+		The directory where files that should survive an unclean
+		shutdown, like the list of managed nodes,  will be created.
+
 	-media=/media
 		The directory where the symlinks to the amd mounts will be
 		created.

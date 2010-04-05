@@ -26,8 +26,8 @@
 # towards early unmounting. Increase these values to be less aggressive.
 #
 
-#c=2
-#w=1
+#c=10
+#w=5
 
 ###
 # You can change the directory that is populated with mountpoints, e.g. to
@@ -48,6 +48,12 @@
 # Uncomment the following tu use the fusefs ntfs implemention of the NTFS file
 # system, with root:operater 0775 access for directories and 0664 for files.
 #
+
+#ntfs_options=rw,noatime,mountprog=%%PREFIX%%/bin/ntfs-3g,sync_unmount
+#ntfs_options=$ntfs_options,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
+
+# The following lines do similar on FreeBSD versions without the mountprog
+# option.
 
 #ntfs=ntfs-3g
 #ntfs_options=rw,noatime,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
