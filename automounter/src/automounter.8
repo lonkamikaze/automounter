@@ -32,15 +32,10 @@
 .Nd Dynamically configure amd for existing devices.
 .Sh SYNOPSIS
 .Nm
-(
-.Ar start
-|
-.Ar update
-|
+.Pq Ar start | Ar update | Ar list | Ar stop
+.Nm
 .Ar list
-|
-.Ar stop
-)
+.Op Ar mounted | Ar labels | Ar keys | Ar encrypted
 .Sh DESCRIPTION
 The
 .Nm
@@ -86,13 +81,13 @@ and creates the necessary mount points and links. It also removes stale
 mount points and links.
 .It Ar list
 Lists the labels of currently managed mounts, the keys found on the media and
-the encrypted images that are available.
+the encrypted providers that are available.
 .It Ar list mounted
 Lists the currently mounted labels.
 .It Ar list keys
 Lists the keys that were found on the managed media.
-.It Ar list images
-Lists the images and devices that are available. If attached the media that
+.It Ar list encrypted
+Lists the images and devices that are available. If attached, the media that
 contains the key will also be listed.
 .It Ar stop
 Unmount everything, stop
@@ -141,10 +136,13 @@ in the following way:
 "%%PREFIX%%/sbin/automounter update > /dev/ttyv0 2>&1"
 .Ed
 .Sh ACCESS RIGHTS
-The mount point inherits the access rights of the device node. This is useful
-for file systems that don't support proper user management like msdosfs.
+The mount point inherits the access rights of the label device node. This is
+useful for file systems that don't support proper user management like msdosfs.
 If any right is present for the owner, group or others the executable flag is
 added to ensure that cding into the file system is possible.
+.Pp
+If the label device node is not found, e.g. because the label is empty, the
+regular device node will be used instead.
 .Pp
 To find out how to change the access rights to a device node and hence of the
 resulting mount point read the

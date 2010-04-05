@@ -21,12 +21,12 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.3.5
+version=1.3.6
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
-c=2
-w=1
+c=10
+w=5
 l="%%RUN%%/automounter.amd.log"
 directory="%%RUN%%/automounter.amd.mnt"
 map="%%RUN%%/automounter.amd.map"
@@ -38,7 +38,7 @@ static_map="%%MAP%%"
 devfs="%%DEVFS%%"
 
 # A file to remember for which partitions automounter has been configured.
-nodes="%%RUN%%/automounter.nodes"
+nodes="%%TMP%%/automounter.nodes"
 
 # A temporary file for the partitions of the last run.
 oldnodes="%%RUN%%/automounter.nodes.old"
@@ -58,13 +58,13 @@ lock="%%RUN%%/automounter.lock"
 # Geli is inactive, set this to anything but 0 to activate it.
 geli=0
 
-# A file to remember which geli encrypted images belong to which node.
+# A file to remember which geli encrypted providers belong to which node.
 #
 # The file is in the following format:
-# 	<imageName>;<mdDevice>;<keyLabel>
+# 	<providerName>;<mdDevice>;<keyLabel>
 #
 # It is expected to meet this extended regular expression: [^;]+;md[0-9]+;[^;]+
-# 	imageName	is the filename of the image.
+# 	providerName	is the filename of the image or device link.
 #	mdDevice	is the device node of the file backed memory disk as
 #			it was returned by mdconfig.
 #	keyLabel	is the absolute path to the key the image was activated
@@ -81,7 +81,7 @@ geli_oldnodes="%%RUN%%/automounter.geli.oldnodes"
 #	<label>;<keyName>
 geli_availablekeys="%%RUN%%/automounter.geli.keys"
 
-# GEOM ELI encrypted images location.
+# GEOM ELI encrypted images and device link location.
 geli_images="%%GELI_IMAGES%%"
 
 # GEOM ELI keys location.
@@ -113,8 +113,161 @@ if [ -e "$config" -a ! -d "$config" ]; then
 	. "$config"
 fi
 
+# devfs must not end with /
+devfs="${devfs%/}"
+
 IFS='
 '
+
+#
+# Removes a set of media links.
+#
+# @param @
+#	Expects a list of labels and devices in the form:
+#		[<label> <device>]*
+#
+rmLinks() {
+	local label device
+
+	while [ -n "$1" ]; do
+		label="$1"
+		device="$2"
+		# Prepare for the next iteration.
+		shift 2
+
+		# Make sure this device is not mounted.
+		/sbin/umount -f "$mountdir/$label" > "$devfs/null" 2>&1
+
+		# Remove the stale label.
+		echo "del label: <$label> from <$device>"
+		/bin/rm "$linkdir/$label"
+		/bin/rm "$linkdir/${devfs##*/}/$device"
+		/bin/rmdir "$linkdir/${devfs##*/}" 2> "$devfs/null"
+		/bin/rmdir "$linkdir/${label%%/*}" 2> "$devfs/null"
+		/bin/rmdir "$mountdir/$label"
+		/bin/rmdir "$mountdir/${label%%/*}" 2> "$devfs/null"
+
+		# Forget keys belonging to this label.
+		keys="$(echo "$keys" | grep -Fv ";$label;")"
+	done
+}
+
+#
+# Creates a set of media links.
+#
+# @param @
+#	Expects a list of labels and devices in the form:
+#		[<label> <device>]*
+#
+createLinks() {
+	local label device
+
+	while [ -n "$1" ]; do
+		label="$1"
+		device="$2"
+		# Prepare for the next iteration.
+		shift 2
+		
+		# Create mount hooks.
+		echo "add label: <$label> from <$device>"
+		/bin/mkdir -p "$mountdir/$label"
+
+		# Inherit mount node owner from device.
+		/usr/sbin/chown "$(
+			/usr/bin/stat -f %u:%g "$devfs/$label" 2> /dev/null \
+				|| /usr/bin/stat -f %u:%g "$devfs/$device"
+		)" "$mountdir/$label"
+
+		# Inherit permissions from device. Add the executable
+		# bit if read or write are permitted.
+		/bin/chmod "$(
+			(
+				/usr/bin/stat -f %p "$devfs/$label" \
+				2> /dev/null \
+					|| /usr/bin/stat -f %p "$devfs/$device"
+			) | /usr/bin/sed -e 's/.//1' \
+				-e 's/2/3/g' \
+				-e 's/4/5/g' \
+				-e 's/6/7/g'
+		)" "$mountdir/$label"
+
+		# Create the links that invoke amd.
+		/bin/mkdir -p "$linkdir/$type"
+		/bin/mkdir -p "$linkdir/${devfs##*/}"
+		/bin/ln -s "$directory/$hash" "$linkdir/$label"
+		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device"
+	done
+}
+
+#
+# This function is forked by geli_update to unmount images that do not longer
+# have a key available.
+#
+# @param 1
+#	The label of the key holding file system.
+# @param 2
+#	The name of the geli provider to unmount.
+# @param 3
+#	The device the geli provider is available as.
+#
+geli_unmount() {
+	local label name device
+	label="$1"
+	name="$2"
+	device="$3"
+
+	# Attempt to detach until successful or until the
+	# key has returned.
+	while true; do
+		/bin/sleep 1
+		# Skip if the key to this image has returned.
+		/usr/bin/lockf "$lock" /bin/sh -c "
+			if /usr/bin/grep -qFx '$label;$name' \
+				'$geli_availablekeys'; then
+				exit 0
+			else
+				/sbin/geli detach '$device' \
+					2> '$devfs/null' \
+					|| exit 1
+				/bin/mv '$geli_nodes' \
+					'$geli_oldnodes'
+				/usr/bin/grep -vFx '$line' \
+					'$geli_oldnodes' \
+					> '$geli_nodes'
+				/bin/rm '$geli_oldnodes'
+				exit 2
+			fi
+		"
+		case $? in
+			0)
+				# The key is back, no more
+				# need to detach.
+				exit 0
+			;;
+			1)
+				# Detach failed.
+				continue
+			;;
+			2)
+				# Detach succeeded.
+				echo "del encrypted provider:" \
+					"<$name> as <$device>" \
+					"with key from <$label>"
+				break
+			;;
+		esac
+	done
+	# Update labels in a locked fashion.
+	$0 update &
+
+	# Hang around to remove the device node for the image.
+	# Unless it's a device link.
+	if [ -e "$geli_images/$name" ]; then
+		until /sbin/mdconfig -du "$device"; do
+			/bin/sleep "$w"
+		done
+	fi
+}
 
 #
 # Updates the amd.map, the list of partitions and the mount links, if amd
@@ -122,7 +275,7 @@ IFS='
 #
 update() {
 	local device line partitions label type options hash \
-		owner mode key keys
+		owner mode key
 
 	# Give geom some time to identify the label.
 	/bin/sleep "$update_delay"
@@ -172,7 +325,7 @@ update() {
 
 	# Add new mounts.
 	device=
-	for line in $partitions; {
+	for line in $partitions; do
 		# A line separator is encountered, prepare everything
 		# for dealing with the next line.
 		if [ "$line" = "--" ]; then
@@ -221,11 +374,14 @@ update() {
 		# Skip on unknown types.
 		test "$type" = "label" && continue
 
+		# Use the device name for empty labels.
+		test -z "${label#$type/}" && label="$label$device"
+
 		# Remember node.
-		echo "$label" >> "$nodes"
+		echo "$device;$label" >> "$nodes"
 
 		# Create node hash for amd.
-		hash="$(/sbin/md5 -qs "$label")"
+		hash="$(/sbin/md5 -qs "$device;$label")"
 
 		echo "
 # $label
@@ -235,49 +391,29 @@ unmount:=\"$0 umount umount $hash\"
 " >> "$map"
 
 		# Skip if already present.
-		/usr/bin/grep -qx "$label" "$oldnodes" && continue
+		/usr/bin/grep -qFx "$device;$label" "$oldnodes" && continue
 
-		# Create mount hooks.
-		echo "add label: <$label> from <$device>"
-		/bin/mkdir -p "$mountdir/$label"
+		# Create the media links.
+		createLinks "$label" "$device"
+	done
 
-		# Inherit mount node owner from device.
-		/usr/sbin/chown "$(
-			/usr/bin/stat -f %u:%g "$devfs/$label"
-		)" "$mountdir/$label"
+	# Clean up stale nodes, and keep mounted nodes.
+	for line in $(/bin/cat "$oldnodes"); do
+		/usr/bin/grep -qFx "$line" "$nodes" && continue
 
-		# Inherit permissions from device. Add the executable
-		# bit if read or write are permitted.
-		/bin/chmod "$(
-			/usr/bin/stat -f %p "$devfs/$label" | \
-				/usr/bin/sed -e 's/.//1' \
-					-e 's/2/3/g' \
-					-e 's/4/5/g' \
-					-e 's/6/7/g'
-		)" "$mountdir/$label"
+		device="${line%%;*}"
+		label="${line##*;}"
 
-		# Create the link that invokes amd.
-		/bin/mkdir -p "$linkdir/$type"
-		/bin/ln -s "$directory/$hash" \
-			"$linkdir/$label"
-	}
+		# Mounted nodes are not listed by every version of glabel,
+		# so they have to protected.
+		if /sbin/mount | grep -qF " $mountdir/$label "; then
+			echo "$line" >> "$nodes"
+			continue
+		fi
 
-	# Clean up stale mounts.
-	for label in $(/bin/cat "$oldnodes"); {
-		/usr/bin/grep -qx "$label" "$nodes" && continue
-
-		type="${label%%/*}"
-		hash="$(/sbin/md5 -qs "$label")"
-
-		echo "del label: <$label>"
-		/bin/rm "$linkdir/$label"
-		/bin/rmdir "$linkdir/$type" 2> "$devfs/null"
-		/bin/rmdir "$mountdir/$label"
-		/bin/rmdir "$mountdir/$type" 2> "$devfs/null"
-
-		# Forget keys belonging to this label.
-		keys="$(echo "$keys" | grep -Ev "^$label;")"
-	}
+		# Remove the stale media links.
+		rmLinks "$label" "$device"
+	done
 
 	# Finally restart amd.
 	until [ -n "$(/bin/cat "$pidfile" 2> "$devfs/null")" ]; do
@@ -295,47 +431,51 @@ unmount:=\"$0 umount umount $hash\"
 }
 
 #
-# Update geli encrypted images. Requires the oldnodes file to be intact.
+# Update geli encrypted providers. Requires the oldnodes file to be intact.
 #
 geli_update() {
 	# Do not run if geli features are not activated.
 	test "$geli" != "1" && return 0
 
-	local keys key label name line update_amd
+	local keys key label name line update_amd device
 
 	# Clean up keys from stale mounts.
 	/usr/bin/touch "$oldnodes"
 	keys="$(/bin/cat "$geli_availablekeys" 2> "$devfs/null")"
-	for label in $(/bin/cat "$oldnodes"); {
-		/usr/bin/grep -qx "$label" "$nodes" && continue
+	for line in $(/bin/cat "$oldnodes"); do
+		# Skip still present lines.
+		/usr/bin/grep -qFx "$line" "$nodes" && continue
+		label="${line##*;}"
+		label="${label%;*}"
 
-		# Forget keys belonging to this label.
-		for line in $(echo "$keys" | /usr/bin/grep -E "^$label;"); {
-			echo "del key: <${line#*;}> from <${line%%;*}>"
-		}
+		# Forget keys belonging to this line.
+		for key in $(echo "$keys" | /usr/bin/grep -E "^$label;"); do
+			echo "del key: <${key##*;}> from <$label>"
+		done
 		keys="$(echo "$keys" | /usr/bin/grep -Ev "^$label;")"
-	}
+	done
 
 	# Now we check new mounts for keys.
-	/bin/rm "$geli_availablekeys" 2> "$devfs/null"
 	echo "$keys" | /usr/bin/grep -xv '' > "$geli_availablekeys"
 
-	for label in $(/bin/cat "$nodes"); {
-		/usr/bin/grep -qx "$label" "$oldnodes" && continue
+	for line in $(/bin/cat "$nodes"); do
+		/usr/bin/grep -qFx "$line" "$oldnodes" && continue
+		label="${line#*;}"
+		device="${line%%;*}"
 	
 		for key in $(
-			/bin/ls "$linkdir/$label/$geli_keys/" \
+			/bin/ls "$linkdir/${devfs##*/}/$device/$geli_keys/" \
 			2> "$devfs/null"
-		); {
+		); do
 			echo "add key: <$key> from <$label>"
 			echo "$label;$key" >> "$geli_availablekeys"
-		}
-	}
+		done
+	done
 
 	# Look for stale images.
 	/usr/bin/touch "$geli_nodes"
 	/bin/mv "$geli_nodes" "$geli_oldnodes"
-	for line in $(/bin/cat "$geli_oldnodes"); {
+	for line in $(/bin/cat "$geli_oldnodes"); do
 		name="${line%%;*}"
 		device="${line#*;}"
 		device="${device%;*}"
@@ -350,67 +490,14 @@ geli_update() {
 		fi
 
 		# This image is stale. Fork a process that tries to unmount it.
-		(
-			# Attempt to detach until successful or until the
-			# key has returned.
-			while true; do
-				/bin/sleep 1
-				# Skip if the key to this image has returned.
-				/usr/bin/lockf "$lock" /bin/sh -c "
-					if /usr/bin/grep -qx '$label;$name' \
-						'$geli_availablekeys'; then
-						exit 0
-					else
-						/sbin/geli detach '$device' \
-							2> '$devfs/null' \
-							|| exit 1
-						/bin/mv '$geli_nodes' \
-							'$geli_oldnodes'
-						/usr/bin/grep -vx '$line' \
-							'$geli_oldnodes' \
-							> '$geli_nodes'
-						/bin/rm '$geli_oldnodes'
-						exit 2
-					fi
-				"
-				case $? in
-					0)
-						# The key is back, no more
-						# need to detach.
-						exit 0
-					;;
-					1)
-						# Detach failed.
-						continue
-					;;
-					2)
-						# Detach succeeded.
-						echo "del encrypted image:" \
-							"<$name> as <$device>" \
-							"with key from <$label>"
-						break
-					;;
-				esac
-			done
-			# Update labels in a locked fashion.
-			$0 update &
-
-			# Hang around to remove the device node for the image.
-			# Unless it's a device link.
-			if [ -e "$geli_images/$name" ]; then
-				until /sbin/mdconfig -du "$device"; do
-					/bin/sleep 1
-				done
-			fi
-		) &
-
-	}
+		geli_unmount "$label" "$name" "$device" &
+	done
 	/usr/bin/touch "$geli_nodes"
 	/bin/rm "$geli_oldnodes"
 
 	# Attach encrypted devices. If necessary create them from images.
 	update_amd=
-	for key in $(/bin/cat "$geli_availablekeys"); {
+	for key in $(/bin/cat "$geli_availablekeys"); do
 		label="${key%;*}"
 		name="${key##*;}"
 
@@ -442,7 +529,7 @@ geli_update() {
 		/usr/bin/cd "$(/usr/bin/dirname "$key")"
 		if /sbin/geli attach -p -k "$key" "$device"; then
 			# Remember success.
-			echo "add encrypted image: <$name> as <$device>" \
+			echo "add encrypted provider: <$name> as <$device>" \
 				"with key from <$label>"
 			echo "$name;$device;$label" >> "$geli_nodes"
 			update_amd=1
@@ -450,7 +537,7 @@ geli_update() {
 			# Unsuccessful, clean up memory disk.
 			/sbin/mdconfig -du "$device"
 		fi
-	}
+	done
 
 	# Restart amd if a change has been made.
 	if [ -n "$update_amd" ]; then
@@ -491,25 +578,21 @@ stop() {
 	fi
 	
 	# Clean up stale mounts.
-	for label in $(/bin/cat "$nodes" 2> "$devfs/null"); {
-		type="${label%%/*}"
-		/sbin/umount -f "$mountdir/$label" > "$devfs/null" 2>&1
+	for line in $(/bin/cat "$nodes" 2> "$devfs/null"); do
+		label="${line##*;}"
+		device="${line%%;*}"
 
-		echo "del: <$label>"
-		/bin/rm "$linkdir/$label"
-		/bin/rmdir "$linkdir/$type" 2> "$devfs/null"
-		/bin/rmdir "$mountdir/$label"
-		/bin/rmdir "$mountdir/$type" 2> "$devfs/null"
-	}
+		rmLinks "$label" "$device"
+	done
 
 	# Clean up stale geli nodes.
-	for line in $(/bin/cat "$geli_nodes" 2> "$devfs/null"); {
+	for line in $(/bin/cat "$geli_nodes" 2> "$devfs/null"); do
 		device="${line#*;}"
 		device="${device%;*}"
 
 		/sbin/geli detach -f "$device"
 		/sbin/mdconfig -du "$device"
-	}
+	done
 
 	# Clean up temporary folders.
 	/bin/rmdir "$a" "$directory" "$mountdir" 2> "$devfs/null"
@@ -537,32 +620,26 @@ list() {
 	# List mounted media.
 	if [ -z "$1" -o "$1" = "mounted" ]; then
 		for line in $(
-			# Format: <device>;<hash>
+			# Format: <device>;<label>
 			/sbin/mount | grep "$mountdir" | \
-				sed -E "s,$devfs/(.+) on $mountdir/[^/]*/([a-f0-9]*).*,\1;\2,1"
+				sed -E "s,$devfs/(.+) on $mountdir/(.*) \(.*,\1;\2,1"
 		); {
-			# If the given devices match a label just print
-			# it and we are done. If not reconstruct the label
-			# through the hash.
-			if /usr/bin/grep -qx "${line%%;*}" "$nodes"; then
-				echo "mounted: <${line%%;*}>"
-			else
-				for label in $(
-					/bin/cat "$nodes" 2> "$devfs/null"
-				); {
-					hash="$(/sbin/md5 -qs "$label")"
-					if [ "$hash" = "${line#*;}" ]; then
-						echo "mounted: <$label>" \
-							"as <${line%%;*}>"
-					fi
-				}
+			# If the given devices match a line just print
+			# it and we are done. Otherwise look for the label
+			# with a different device, which can happen with
+			# fuse devices.
+			device="${line%%;*}"
+			if /usr/bin/grep -qFx "$line" "$nodes"; then
+				echo "mounted: <${line#*;}> from <$device>"
+			elif $(line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"); then
+				echo "mounted: <${line#*;}> from <${line%%;*}> as <$device>"
 			fi
 		}
 	fi
 
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "labels" ]; then
-		/usr/bin/sed -E 's/(.*)/label: <\1>/1' \
+		/usr/bin/sed -E 's/([^;]*);(.*)/label: <\2> from <\1>/1' \
 			"$nodes" 2> "$devfs/null"
 	fi
 
@@ -572,21 +649,21 @@ list() {
 			"$geli_availablekeys" 2> "$devfs/null"
 	fi
 
-	# List the images and their status.
-	if [ -z "$1" -o "$1" = "images" ]; then
-		/usr/bin/sed -E 's/(.*);(.*);(.*)/encrypted image: <\1> as <\2> with key from <\3>/1' \
+	# List the encrypted providers and their status.
+	if [ -z "$1" -o "$1" = "encrypted" -o "$1" = "images" ]; then
+		/usr/bin/sed -E 's/(.*);(.*);(.*)/encrypted provider: <\1> as <\2> with key from <\3>/1' \
 			"$geli_nodes" 2> "$devfs/null"
-		for image in $(/bin/ls "$geli_images/" 2> "$devfs/null"); {
+		for image in $(/bin/ls "$geli_images/" 2> "$devfs/null"); do
 			/usr/bin/grep -qx "$image;.*" "$geli_nodes" \
 				2> "$devfs/null" && continue
 			if [ -e "$geli_images/$image" ]; then
-				echo "encrypted image: <$image>"
+				echo "encrypted provider: <$image>"
 			else
 				device="$(/usr/bin/readlink \
 					"$geli_images/$image")"
-				echo "encrypted image: <$image> as <$device>"
+				echo "encrypted provider: <$image> as <$device>"
 			fi
-		}
+		done
 	fi
 
 	return 0
@@ -599,15 +676,17 @@ list() {
 #	The hash over the name of the device node to mount.
 #
 mount() {
-	local label labels hash
+	local label labels hash device
 
 	# Go through the list of configured partitions.
 	labels="$(/bin/cat "$nodes")"
-	for label in $labels; {
+	for label in $labels; do
 		hash="$(/sbin/md5 -qs "$label")"
 
 		# The current partition is the one we're supposed to mount.
 		if [ "$hash" = "$1" ]; then
+			device="${label%%;*}"
+			label="${label#*;}"
 			type="${label%%/*}"
 			mount="$type"
 			options="$mount_options"
@@ -622,9 +701,9 @@ mount() {
 
 			# Give over to the mount command.
 			exec /sbin/mount -t "$mount" -o "$options" \
-				"$devfs/$label" "$mountdir/$label"
+				"$devfs/$device" "$mountdir/$label"
 		fi
-	}
+	done
 	echo "File system not found."
 	return 1
 }
@@ -637,16 +716,19 @@ mount() {
 #	The hash over the name of the device node to unmount.
 #
 umount() {
+	local label labels
+
 	# Find the label for the current hash.
 	label=
 	labels="$(/bin/cat "$nodes")"
-	for label in $labels; {
+	for label in $labels; do
 		if [ "$1" = "$(/sbin/md5 -qs "$label")" ]; then
+			label="${label#*;}"
 			break
 		else
 			label=
 		fi
-	}
+	done
 
 	# Find out if we are a fuse file system and use dirty bug workaround.
 	# This will lead to unexpected results with more than one fuse based
@@ -692,7 +774,7 @@ case "$1" in
 			;;
 		esac
 	;;
-	mount | umount | list)
+	list | mount | umount)
 		$1 "$2"
 	;;
 	*)

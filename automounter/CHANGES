@@ -1,43 +1,52 @@
-automounter-1.3.5 (February 3, 2010):
+automounter-1.3.6 (3 April, 2010):
+  - Work around devices with an empty label.
+  - Additionally offer access by device name instead of label.
+  - Work around new glabel behaviour, that cause mounted nodes to disappear.
+  - Remember managed nodes despite an unclean shutdown, so that a cleanup
+    occurs during the next boot.
+  - Also show fuse devices with the 'list mounted' command.
+  - Remove redundant code.
+
+automounter-1.3.5 (3 February, 2010):
   - Block mounting by file system ID by default, because it works only once.
   - Remove the second license clause.
 
-automounter-1.3.4 (August 13, 2009):
+automounter-1.3.4 (13 August, 2009):
   - Block umounts during file system activity, because it can cause tcsh to
     forget the current directory.
   - Update installer to install compressed manual pages.
 
-automounter-1.3.3 (November 26, 2008):
+automounter-1.3.3 (26 November, 2008):
   - Some of the umount output is now hidden to keep the amd logfile small.
   - The script has been adjusted to be compatible with recent changes in sed
     that broke the handling of blacklists.
 
-automounter-1.3.2 (September 02, 2008):
+automounter-1.3.2 (02 September, 2008):
   - A wrong requirement in the rc file was corrected.
   - The mount directories are now named like the device labels instead of using
     an md5 hash. This makes the mount and pwd commands much more readable.
     Only the amd internal identifiers remain md5 hashes to make up for its
     inabilty to handle spaces.
 
-automounter-1.3.1 (May 20, 2008):
+automounter-1.3.1 (20 May, 2008):
   - To avoid stale NFS handles cd into the key location before attempting to
     attach an encrypted image/device.
   - Force start nfsclient and rpcbind on startup, to make amd work on machines
     not configured for nfs.
 
-automounter-1.3 (April 18, 2008):
+automounter-1.3 (18 April, 2008):
   - The list images output has been fixed.
   - The list mounted output has been added to show mounted labels.
   - There is now a very evil workaround for the fusefs unmount bug.
 
-automounter-1.2 (April 13, 2008):
+automounter-1.2 (13 April, 2008):
   - Automounter no longer uses camcontrol and atacontrol, this has several
     benefits, such as being able to mount memory disks and loosing the
     the restrictions on device blacklisting.
   - Automounter can now poll keys from managed file systems and automatically
     geli attach images and devices.
 
-automounter-1.1 (April 06, 2008):
+automounter-1.1 (06 April, 2008):
   - The INSTALL file has been added to document the installation.
   - The update_delay option has been added.
   - To make everything label with spaces safe amd nodes now are md5 hashes.
@@ -46,11 +55,11 @@ automounter-1.1 (April 06, 2008):
   - The manual pages automounter(8) and automounter.conf(5) have both been
     updated.
 
-automounter-1.0 (March 28, 2008):
+automounter-1.0 (28 March, 2008):
   - There are now default mount options for optical media that make sense.
   - The rc-script now supports the update parameter.
 
-automounter-0.9 (March 26, 2008):
+automounter-0.9 (26 March, 2008):
   - First beta release, containing automounter, an rc-script, a sample
     configuration and the manual pages automounter(8) and automounter.conf(5).
 
