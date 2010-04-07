@@ -1421,7 +1421,7 @@ bsda:obj:createClass() {
 				# Echo each attribute.
 				for attribute in \$(echo '$attributes'); do
 					eval \"echo \\\"\\\${\$this\$attribute}\\\"\"
-				done | grep -Eo '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | sort -u
+				done | egrep -o '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | sort -u
 			)\"
 
 			# Serialize all required objects.
@@ -1493,7 +1493,7 @@ bsda:obj:createClass() {
 	# A static type checker.
 	eval "
 		$class.isInstance() {
-			echo \"\$1\" | grep -xEq \"\${${classPrefix}instancePatterns}\"
+			echo \"\$1\" | egrep -xq \"\${${classPrefix}instancePatterns}\"
 		}
 	"
 
@@ -1691,7 +1691,7 @@ bsda:obj:createInterface() {
 	# A static type checker.
 	eval "
 		$interface.isInstance() {
-			echo \"\${1:-dummy}\$1\" | grep -xEq \"\${${interfacePrefix}instancePatterns}\"
+			echo \"\${1:-dummy}\$1\" | egrep -xq \"\${${interfacePrefix}instancePatterns}\"
 		}
 	"
 
@@ -1818,7 +1818,7 @@ bsda:obj:deserialize() {
 #	0 for objects, 1 for everything else.
 #
 bsda:obj:isObject() {
-	echo "$1" | grep -qExe "$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_"
+	echo "$1" | egrep -qxe "$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_"
 }
 
 #
@@ -1831,7 +1831,7 @@ bsda:obj:isObject() {
 #	0 for integers, 1 for everything else.
 #
 bsda:obj:isInt() {
-	echo "$1" | grep -qExe "(-|\+)?[0-9]+"
+	echo "$1" | egrep -qxe "[-+]?[0-9]+"
 }
 
 #
@@ -1843,7 +1843,7 @@ bsda:obj:isInt() {
 #	0 for unsigned integers, 1 for everything else.
 #
 bsda:obj:isUInt() {
-	echo "$1" | grep -qExe "\+?[0-9]+"
+	echo "$1" | egrep -qxe "\+?[0-9]+"
 }
 
 #
@@ -1867,7 +1867,7 @@ bsda:obj:isUInt() {
 #	0 for floats, 1 for everything else.
 #
 bsda:obj:isFloat() {
-	echo "$1" | grep -qExe "(-|\+)?[0-9]+(\.[0-9]+)?(e(-|\+)?[0-9]+)?"
+	echo "$1" | egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?(e(-|\+)?[0-9]+)?"
 }
 
 #
@@ -1875,7 +1875,7 @@ bsda:obj:isFloat() {
 # Simple floats may be signed, but there must not be any spaces.
 # This function does not obey the locale.
 #
-# The following are examples for valid floats:
+# The following are examples for valid simple floats:
 #	1
 #	1.0
 #	-1.5
@@ -1887,7 +1887,7 @@ bsda:obj:isFloat() {
 #	0 for simple floats, 1 for everything else.
 #
 bsda:obj:isSimpleFloat() {
-	echo "$1" | grep -qExe "(-|\+)?[0-9]+(\.[0-9]+)?"
+	echo "$1" | egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?"
 }
 
 #

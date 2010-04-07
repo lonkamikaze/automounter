@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2006-2009
+# Copyright (c) 2006-2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
 #
 
 readonly name=portconfig
-readonly version=1.9.1
+readonly version=1.9.2
 
 # Use the script call as a command given to the selected startscript.
 # Several commands can be realized with symlinks to this script,
@@ -145,7 +145,7 @@ readParams() {
 getPorts() {
 	local depth port candidate candidates shortest
 	test "$1" -gt 1 && return 0
-	depth="$(("$1" + 1))"
+	depth=$(($1 + 1))
 	for port in "$@"; {
 		test "$port" \= "$1" && continue
 
@@ -266,7 +266,7 @@ for port in $ports; {
 			break 1
 		fi
 
-		count="$(("$count" + 1))"
+		count=$((count + 1))
 	done
 }
 
