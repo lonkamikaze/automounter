@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
 #
 
 readonly name=distviper
-readonly version=1.1
+readonly version=1.2
 
 verbose=
 demo=
@@ -210,12 +210,12 @@ for file in $(find "$distdir" -type f); {
 	else
 		test -z "$quiet" && echo "delete $file"
 		test -z "$demo" && rm $interactive "$distdir/$file"
-		filesDelete=$(($filesDelete + 1))
+		filesDelete=$((filesDelete + 1))
 	fi
 }
 
 # The number of deleted files
-filesDeleted="$(($filesCount - $(find "$distdir" -type f|wc -l)))"
+filesDeleted="$((filesCount - $(find "$distdir" -type f|wc -l)))"
 
 test -z "$demo" && find -d "$distdir" -type d -exec rmdir \{} \; 2> /dev/null
 

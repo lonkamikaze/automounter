@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-readonly version=1.4
+readonly version=1.4.1
 readonly name=uma
 
 # Return value.
@@ -143,26 +143,26 @@ export PACKAGEROOT_MIRRORS PACKAGESITE_MIRRORS
 #	The exit status of the script.
 #
 verbose() {
-	if [ $(($errno >> $ERR_LOCK & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_LOCK))): Lock owned by someone else."
+	if [ $((errno >> ERR_LOCK & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_LOCK))): Lock owned by someone else."
 	fi
-	if [ $(($errno >> $ERR_ARG & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_ARG))): An unknown parameter was supplied."
+	if [ $((errno >> ERR_ARG & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_ARG))): An unknown parameter was supplied."
 	fi
-	if [ $(($errno >> $ERR_FETCH_PORTS & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_FETCH_PORTS))): Fetching the ports tree failed."
+	if [ $((errno >> ERR_FETCH_PORTS & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_FETCH_PORTS))): Fetching the ports tree failed."
 	fi
-	if [ $(($errno >> $ERR_FETCH_VULNDB & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_FETCH_VULNDB))): Fetching security database failed."
+	if [ $((errno >> ERR_FETCH_VULNDB & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_FETCH_VULNDB))): Fetching security database failed."
 	fi
-	if [ $(($errno >> $ERR_FETCH_INDEX & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_FETCH_INDEX))): Fetching remote INDEX, MOVED or UPDATING  failed."
+	if [ $((errno >> ERR_FETCH_INDEX & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_FETCH_INDEX))): Fetching remote INDEX, MOVED or UPDATING  failed."
 	fi
-	if [ $(($errno >> $ERR_EXTRACT_PORTS & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_EXTRACT_PORTS))): Extracting the ports tree failed."
+	if [ $((errno >> ERR_EXTRACT_PORTS & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_EXTRACT_PORTS))): Extracting the ports tree failed."
 	fi
-	if [ $(($errno >> $ERR_UPDATE_PORTS & 1)) -eq 1 ]; then
-		echo "ERROR($((1 << $ERR_UPDATE_PORTS))): Updating the ports tree failed."
+	if [ $((errno >> ERR_UPDATE_PORTS & 1)) -eq 1 ]; then
+		echo "ERROR($((1 << ERR_UPDATE_PORTS))): Updating the ports tree failed."
 	fi
 }
 
@@ -326,7 +326,7 @@ readParams() {
 				continue
 			;;
 			-? | --*)
-				errno=$((1 << $ERR_ARG))
+				errno=$((1 << ERR_ARG))
 				exit $errno
 			;;
 			-*)
@@ -338,7 +338,7 @@ readParams() {
 
 		# If the variable is not predefined, the command is unknown.
 		if eval "test -n \"\${cmd_$flag=1}\""; then
-			errno=$((1 << $ERR_ARG))
+			errno=$((1 << ERR_ARG))
 			exit $errno
 		fi
 		setvar "cmd_$flag" 1
@@ -455,20 +455,20 @@ fi
 # Ports tree commands.
 if [ -n "$cmd_ports" ]; then
 	if [ -n "$cmd_fetch" ]; then
-		portsnap fetch || errno="$((1 << $ERR_FETCH_PORTS | $errno))"
+		portsnap fetch || errno="$((1 << ERR_FETCH_PORTS | errno))"
 	fi
 	if [ -n "$cmd_extract" ]; then
-		portsnap extract || errno=$((1 << $ERR_EXTRACT_PORTS | $errno))
+		portsnap extract || errno=$((1 << ERR_EXTRACT_PORTS | errno))
 	fi
 	if [ -n "$cmd_update" ]; then
-		portsnap update || errno=$((1 << $ERR_UPDATE_PORTS | $errno))
+		portsnap update || errno=$((1 << ERR_UPDATE_PORTS | errno))
 	fi
 fi
 
 # Portaudit commands.
 if [ -n "$cmd_audit" ]; then
 	if [ -n "$cmd_fetch" ]; then
-		portaudit -F || errno=$((1 << $ERR_FETCH_VULNDB | $errno))
+		portaudit -F || errno=$((1 << ERR_FETCH_VULNDB | errno))
 	fi
 fi
 
@@ -477,7 +477,7 @@ if [ -n "$cmd_ftpindex" ]; then
 	if ! mkdir -p "${PKG_INDEX%/*}" 2> /dev/null; then
 		test -n "$verbose" \
 			&& echo "The directory ${PKG_INDEX%/*} does not exist and cannot be created!"
-		errno=$((1 << $ERR_FETCH_INDEX | $errno))
+		errno=$((1 << ERR_FETCH_INDEX | errno))
 	elif [ -n "$cmd_fetch" ]; then
 		# Do all that download stuff parallel, to not waste so much
 		# time on establishing connections.
@@ -487,24 +487,24 @@ if [ -n "$cmd_ftpindex" ]; then
 		job2=$!
 		wait $job1 \
 		&& wait $job2 \
-		|| errno=$((1 << $ERR_FETCH_INDEX | $errno))
+		|| errno=$((1 << ERR_FETCH_INDEX | errno))
 		fetch -mo "$PKG_MOVED.bz2.md5" "$packagetree/MOVED.bz2.md5" &
 		job3=$!
 		fetch -mo "$PKG_MOVED.bz2.sha256" "$packagetree/MOVED.bz2.sha256" &
 		job4=$!
 		wait $job3 \
 		&& wait $job4 \
-		|| errno=$((1 << $ERR_FETCH_INDEX | $errno))
+		|| errno=$((1 << ERR_FETCH_INDEX | errno))
 		fetch -mo "$PKG_UPDATING.bz2.md5" "$packagetree/UPDATING.bz2.md5" &
 		job5=$!
 		fetch -mo "$PKG_UPDATING.bz2.sha256" "$packagetree/UPDATING.bz2.sha256" &
 		job6=$!
 		wait $job5 \
 		&& wait $job6 \
-		|| errno=$((1 << $ERR_FETCH_INDEX | $errno))
+		|| errno=$((1 << ERR_FETCH_INDEX | errno))
 		wait
 
-		if [ "$((($errno >> $ERR_FETCH_INDEX) & 1))" -eq "0" ]; then
+		if [ "$(((errno >> ERR_FETCH_INDEX) & 1))" -eq "0" ]; then
 
 			downloadBZ2File "$packagetree/INDEX" "$PKG_INDEX" &
 			job1=$!
@@ -518,7 +518,7 @@ if [ -n "$cmd_ftpindex" ]; then
 			wait $job1 \
 			&& wait $job2 \
 			&& wait $job3 \
-			|| errno=$((1 << $ERR_FETCH_INDEX | $errno))
+			|| errno=$((1 << ERR_FETCH_INDEX | errno))
 			wait
 		fi
 	fi

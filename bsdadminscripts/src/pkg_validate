@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2007-2009
+# Copyright (c) 2007-2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
 #
 
 readonly name=pkg_validate
-readonly version=1.5.1
+readonly version=1.5.2
 
 # Use line break as delimiter for lists.
 IFS='
@@ -93,10 +93,10 @@ validatePkg() {
 	abort $?
 	for line in $lines; {
 		if echo "$line" | grep -E 'checksum$' > /dev/null; then
-			csum_count=$(($csum_count + 1))
+			csum_count=$((csum_count + 1))
 			abort $?
 		else
-			miss_count=$(($miss_count + 1))
+			miss_count=$((miss_count + 1))
 			abort $?
 		fi
 	}
@@ -117,7 +117,7 @@ validatePkg() {
 			printf "%s$delimiter%s\n" \
 				"$package" "$origin"
 		fi
-		damaged="$(("$damaged" + 1))"
+		damaged=$((damaged + 1))
 		abort $?
 	fi
 }
@@ -238,7 +238,7 @@ test "$validate_all" -eq 1 && request_pkgs='-a'
 amount=$(pkg_info -E $request_pkgs | wc -l | sed -E 's/[[:space:]]+//g')
 abort $?
 amount_width=${#amount}
-package_width="$((41 - 2 * $amount_width))"
+package_width=$((41 - 2 * amount_width))
 abort $?
 test "$amount_width" -lt 4 && amount_width=4
 count=0
@@ -249,7 +249,7 @@ abort $?
 for package in $packages; {
 	origin="$(pkg_info -qo "$package")"
 	abort $?
-	count=$(($count + 1))
+	count=$((count + 1))
 	abort $?
 	validatePkg
 }

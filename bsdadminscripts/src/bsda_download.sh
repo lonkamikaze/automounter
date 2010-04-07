@@ -66,8 +66,6 @@ bsda:obj:createClass bsda:download:Manager \
 		"The PID of the background downloading process." \
 	i:private:init \
 		"The constructor." \
-	c:private:clean \
-		"The destructor." \
 	x:private:downloader \
 		"Forked off by the constructor to create the downloader" \
 		"process." \
@@ -117,10 +115,12 @@ bsda:download:Manager.init() {
 	setvar ${this}downloaderPID $!
 }
 
-bsda:download:Manager.clean() {
-	return
-}
-
+#
+# This method is called and forked by the constructor and acts as the
+# background downloader job.
+#
+# Once the downloader 
+#
 bsda:download:Manager.downloader() {
 	local scheduler sleeper servers messenger
 
@@ -147,6 +147,13 @@ bsda:download:Manager.downloader() {
 	$this.delete
 }
 
+#
+# The run method required by the bsda:scheduler:Process interface.
+#
+# It checks whether the current process is the background downloader or the
+# controlling process and calls runController() or runDownloader()
+# accordingly.
+#
 bsda:download:Manager.run() {
 	local downloaderPID
 
@@ -159,6 +166,11 @@ bsda:download:Manager.run() {
 	fi
 }
 
+#
+# Called by the run() method in the controller context.
+#
+# Flushes the message queue, i.e. update all Jobs.
+#
 bsda:download:Manager.runController() {
 	local messenger lines count
 
@@ -167,6 +179,13 @@ bsda:download:Manager.runController() {
 	eval "$lines"
 }
 
+#
+# Called by the run() method in the downloader context.
+#
+# If a controlling process was defined, terminate the scheduler if the process
+# disappeared.
+# Update objects from the queue and register jobs to the scheduler.
+#
 bsda:download:Manager.runDownloader() {
 	local IFS messenger line lines count object scheduler controllerPID
 
@@ -196,10 +215,17 @@ bsda:download:Manager.runDownloader() {
 	done
 }
 
+#
+# Required by the bsda:scheduler:Process interface.
+#
+# Does nothing.
+#
 bsda:download:Manager.stop() {
 	return
 }
 
+#
+# Sends data strings through the message queue.
 #
 # @param 1
 #	The message to send.
@@ -222,6 +248,16 @@ bsda:download:Manager.send() {
 	return 0
 }
 
+#
+# Sends an object through the queue. This is a multi-processing safe
+# operation.
+#
+# @param 1
+#	The object to send.
+# @return
+#	1 if the message is not an object.
+#	0 if everything is in order.
+#
 bsda:download:Manager.sendObject() {
 	# Check whether this is an object.
 	bsda:obj:isObject "$1" || return 1
@@ -240,15 +276,20 @@ bsda:download:Manager.sendObject() {
 	return 0
 }
 
+#
+# Propagates the calling object to the partner process.
+#
 bsda:download:Manager.propagate() {
 	local object
-	# Serialize the caller.
+	# Get the caller.
 	$caller.getObject object
 
 	# Propagate the object to the partner process.
 	$this.sendObject "$object"
 }
 
+#
+# Creates a new job and forwards it to the downloading process.
 #
 # @param 1
 #	The name of the variable to store the created job in.
@@ -266,7 +307,7 @@ bsda:download:Manager.createJob() {
 	# Create the job.
 	bsda:download:Job job $this $servers "$2" "$3"
 	# Return the job.
-	$caller.setvar $job
+	$caller.setvar "$1" $job
 
 	# Dispatch the job.
 	$this.sendObject $servers
@@ -399,13 +440,13 @@ bsda:download:Server.download() {
 		result=$?
 		$sender.send "download=$$;job=$job;status=$result;size=$size"
 	) &
-	# Update the amount of available download slots.
-	$this.getFree free
-	$this.setFree $(($free - 1))
-
 	# Append the new download.
 	downloads="${downloads:+$downloads$IFS}$!"
 	$this.setDownloads "$downloads"
+
+	# Update the amount of available download slots.
+	$this.getFree free
+	$this.setFree $(($free - 1))
 
 	# Propagate changes to the controlling process.
 	$job.getManager manager

@@ -317,7 +317,7 @@ bsda:pkg:Index.identifyOrigins() {
 	matching=
 
 	# Redirect requests that are not glob patterns.
-	if ! echo "$2" | grep -qE '\*|\?|\[.*]'; then
+	if ! echo "$2" | egrep -q '\*|\?|\[.*]'; then
 		$this.getPackagesByOrigins matching "$2"
 		# Check whether there was a match.
 		if [ -z "$matching" ]; then
@@ -369,7 +369,7 @@ bsda:pkg:Index.identifyNames() {
 '
 
 	# Deal with glob patterns.
-	if echo "$2" | grep -qE '\*|\?|\[.*]'; then
+	if echo "$2" | egrep -q '\*|\?|\[.*]'; then
 		$this.getPackagesByOrigins matching "$(pkg_info -qo "$2" 2> /dev/null)"
 		# Check for matches.
 		if [ -z "$matching" ]; then

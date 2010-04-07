@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2007-2009
+# Copyright (c) 2007-2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
 #
 
 readonly name=pkg_libchk
-readonly version=1.6.1
+readonly version=1.6.2
 
 # Use a line break as delimiter.
 IFS='
@@ -88,7 +88,7 @@ semaphoreUse() {
 	while ! lockf -k "$lock" sh -c "
 			state=\$(cat '$lock')
 			if [ \"\$state\" -gt 0 ]; then
-				echo \"\$((\$state - 1))\" > '$lock'
+				echo \$((state - 1)) > '$lock'
 				exit 0
 			fi
 			exit 1
@@ -107,7 +107,7 @@ semaphoreFree() {
 	local lock
 	lock="$sharedprefix-semaphore-$1"
 	lockf -k "$lock" sh -c "
-		state=\"\$((\"\$(cat '$lock')\" + 1))\"
+		state=\$((\$(cat '$lock') + 1))
 		echo \"\$state\" > '$lock'
 	"
 }
@@ -169,7 +169,7 @@ semaphoreCountDown() {
 	local free size
 	while read -t1 free < "$sharedprefix-semaphore-$1"; do
 		size=$(eval "echo \$semaphore_$1_size")
-		statusSet "$(printf "$2" $(( $size - $free )))"
+		statusSet "$(printf "$2" $((size - free)))"
 		test "$free" -eq "$size" && break
 		sleep 0.1
 	done
@@ -394,7 +394,7 @@ prefix="$(make -f /usr/share/mk/bsd.port.mk -VPREFIX 2> /dev/null || \
 compat="=> $prefix/lib/compat|"
 
 # Create the semaphore with CPU cores * 2 jobs.
-semaphoreCreate jobs "$(($(sysctl -n hw.ncpu 2> /dev/null || echo 1) * 2))"
+semaphoreCreate jobs $(($(sysctl -n hw.ncpu 2> /dev/null || echo 1) * 2))
 # Register the status lock.
 lockRegister status
 
@@ -419,7 +419,7 @@ package_num=0
 
 # Check each selected package.
 for package in $packages; {
-	package_num="$(($package_num + 1))"
+	package_num=$((package_num + 1))
 	test $origin \
 		&& package_name="$(pkg_info -qo "$package")" \
 		|| package_name="$package"
