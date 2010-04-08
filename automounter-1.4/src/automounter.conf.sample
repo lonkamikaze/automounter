@@ -1,0 +1,94 @@
+#
+# This file contains examples for configuring automounter(8). Read the
+# automounter.conf(5) manual page to learn all the possibilities.
+#
+# - Dominic Fandrey <kamikaze@bsdforen.de>
+#
+
+###
+# Enable geli key polling and auto attaching.
+#
+
+#geli=1
+
+###
+# The automounter aquires a lock to prevent simultaneous calls of the script
+# from interfering with each other. Aquiring the lock can timeout. The default
+# is 10 seconds, set this to 0 to skip if the lock cannot be aquired
+# immediately.
+#
+
+#timeout=10
+
+###
+# The automounter uses amd(8) to actually mount the identified mounts.
+# By default automounter tunes the cache and wait time of amd aggressively
+# towards early unmounting. Increase these values to be less aggressive.
+#
+
+#c=10
+#w=5
+
+###
+# You can change the directory that is populated with mountpoints, e.g. to
+# avoid clashes with HAL-based solutions.
+#
+
+#linkdir="%%MEDIA%%"
+
+###
+# The following line reduces the probability of data corruption when removing
+# mounted media by activating synced I/O. Due to the extreme performance
+# punishment this is and will not be the default.
+#
+
+#mount_options=$mount_options,sync
+
+### 
+# Uncomment the following tu use the fusefs ntfs implemention of the NTFS file
+# system, with root:operater 0775 access for directories and 0664 for files.
+#
+
+#ntfs_options=rw,noatime,mountprog=%%PREFIX%%/bin/ntfs-3g,sync_unmount
+#ntfs_options=$ntfs_options,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
+
+# The following lines do similar on FreeBSD versions without the mountprog
+# option.
+
+#ntfs=ntfs-3g
+#ntfs_options=rw,noatime,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
+
+###
+# Uncomment the following line to activate a very evil bug workaround for
+# fuse based mounts (e.g. ntfs-3g). If more than one fuse file system
+# is mounted at a time, this will lead to unexpected results.
+#
+# With this workaround in place any fuse based file system will only be
+# unmounted if ALL fuse based file systems are free for unmounting.
+#
+# Without this workaround all files in a fuse based file system will be closed
+# whenever amd tries to unmount. With the default settings that means
+# every second.
+#
+
+#evil_fuse=1
+
+###
+# The following options cause msdosfs mounts to be treated as UTF-8 encoded
+# and make sure that files do not get the executable bit, while directories
+# keep it.
+#
+
+#msdosfs_options=$mount_options,-L=en_GB.UTF-8,-m660,-M770
+
+###
+# Blacklist certain devices or nodes, separated by ','.
+# This is useful to except nodes that are already handled elsewhere,
+# e.g. in the static amd map or in the fstab(5) file.
+#
+# These are shell patterns. Don't forget to quote or escape stuff.
+#
+
+#blacklist_devs="ad*,acd*"
+#blacklist_nodes="ufs/*"
+

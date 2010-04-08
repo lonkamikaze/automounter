@@ -1,0 +1,204 @@
+.\"
+.\" Copyright (c) 2008, 2009, 2010
+.\" Dominic Fandrey <kamikaze@bsdforen.de>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\"
+.Dd Apr 9, 2010
+.Dt AUTOMOUNTER 8
+.Os
+.Sh NAME
+.Nm automounter
+.Nd Dynamically configure amd for existing devices.
+.Sh SYNOPSIS
+.Nm
+.Pq Ar start | Ar update | Ar list | Ar stop
+.Nm
+.Ar list
+.Op Ar mounted | Ar labels | Ar keys | Ar encrypted
+.Sh DESCRIPTION
+The
+.Nm
+script dynamically builds a map file for
+.Xr amd 8 .
+It is meant to be started by the
+.Xr rc 8
+system and trigerred by
+.Xr devd 8
+when devices appear or disappear.
+.Pp
+By default
+.Nm
+copies the file %%MAP%% and builds its configuration on top of that.
+This means it inherits everything defined there and amd_enable="YES" should
+.Ar not
+be set in
+.Xr rc.conf 5 .
+.Pp
+The script also supports polling the keys of
+.Xr geli 8
+encrypted partitions and images from managed media.
+More information is available in the
+.Ar GELI
+section of this manual page.
+.Pp
+This manual page describes how to set up
+.Nm .
+How to adjust its behaviour is described in the
+.Xr automounter.conf 5
+manual page.
+.Sh OPTIONS
+The following options are available:
+.Bl -tag -width indent
+.It Ar start
+Starts
+.Xr amd 8
+and calls update.
+.It Ar update
+Updates the dynamic map file for
+.Xr amd 8
+and creates the necessary mount points and links. It also removes stale
+mount points and links.
+.It Ar list
+Lists the labels of currently managed mounts, the keys found on the media and
+the encrypted providers that are available.
+.It Ar list mounted
+Lists the currently mounted labels.
+.It Ar list keys
+Lists the keys that were found on the managed media.
+.It Ar list encrypted
+Lists the images and devices that are available. If attached, the media that
+contains the key will also be listed.
+.It Ar stop
+Unmount everything, stop
+.Xr amd 8
+and clean everything up.
+.El
+.Pp
+Unsupported parameters will cause printing of supported parameters.
+.Sh NOTES
+Automounter is made for the sake of comfort. Even though it reduces the
+probabilty of panics, the user is still oblieged to run
+.Xr mount 8
+to make sure a device is not mounted, before unplugging it.
+.Sh STARTUP
+In order for the dynamic creation and destruction of mountpoints to work,
+it is necessary that
+.Nm
+is started first. The recommended way to achieve this is by setting the
+following line in
+.Xr rc.conf 5 :
+.Pp
+	automounter_enable="YES"
+.Pp
+To start it without rebooting run the following command:
+.Pp
+	%%PREFIX%%/etc/rc.d/automounter start
+.Sh DYNAMIC MOUNTS
+To dynamically adjust mounts when USB storage devices appear add the
+following lines to
+.Xr devd.conf 5 :
+.Bd -literal -offset indent
+# Call automounter to update mounts.
+attach 100 {
+	device-name "umass[0-9]+";
+	action "%%PREFIX%%/sbin/automounter update";
+};
+detach 100 {
+	device-name "umass[0-9]+";
+	action "%%PREFIX%%/sbin/automounter update";
+};
+.Ed
+.Pp
+If you want to see the output on the first terminal you can change the action
+in the following way:
+.Bd -literal -offset indent
+"%%PREFIX%%/sbin/automounter update > /dev/ttyv0 2>&1"
+.Ed
+.Sh ACCESS RIGHTS
+The mount point inherits the access rights of the label device node. This is
+useful for file systems that don't support proper user management like msdosfs.
+If any right is present for the owner, group or others the executable flag is
+added to ensure that cding into the file system is possible.
+.Pp
+If the label device node is not found, e.g. because the label is empty, the
+regular device node will be used instead.
+.Pp
+To find out how to change the access rights to a device node and hence of the
+resulting mount point read the
+.Xr devfs.rules 5
+manual page.
+.Sh GELI
+The
+.Nm
+script is able to poll keys for encrypted images and devices from managed media
+(such as a USB stick) and create the necessary device nodes to access these
+images.  Images containing labeled partitions are detected like managed media
+and can even contain keys themselves. Keys and labels will simply be updated
+whenever new ones show up.
+.Pp
+If a used key disappears the encrypted device will be detached when no longer
+in use.
+.Pp
+To activate and configure this feature please refer to the
+.Ar GELI
+section of the
+.Xr automounter.conf 5
+manual page.
+.Pp
+How to create images that can be mounted with a key (password authentication
+is not supported) is described in the
+.Xr geli 8
+manual page. Keys are expected to reside in %%GELI_KEYS%% on a labeled
+partition and the images are expected to be stored in %%GELI_IMAGES%%.
+.Pp
+Devices have to be unresolvable symlinks from %%GELI_IMAGES%%. E.g. if you wish
+to enable auto attaching for %%DEVFS%%/da0s1 with a key named confidental you
+have to create a link in the following fashion:
+.Bd -literal -offset indent
+ln -s da0s1 "%%GELI_IMAGES%%/confidental"
+.Ed
+.Sh FILES
+.Bl -tag -width indent
+.It %%PREFIX%%/sbin/automounter
+.It %%PREFIX%%/etc/automounter.conf
+.It %%PREFIX%%/etc/automounter.conf.sample
+.It %%PREFIX%%/etc/rc.d/automounter
+.Sh BUGS/UNEXPECTED BEHAVIOUR
+Fuse based filesystems like ntfs-3g close all openened files when amd tries to
+unmount them. This is a bug in fuse and neither automounter nor amd are to
+blame. A workaround for this bug is described in the
+.Xr automounter.conf 5
+manual page.
+.Sh COMPATIBILITY
+The script has been tested on FreeBSD 8.0-STABLE
+.Sh SEE ALSO
+.Xr automounter.conf 5 ,
+.Xr amd 8 ,
+.Xr rc 8 ,
+.Xr rc.conf 5 ,
+.Xr devd.conf 5 ,
+.Xr devfs.rules 5 ,
+.Xr geli 8
+.Sh AUTHOR
+Dominic Fandrey <kamikaze@bsdforen.de>
