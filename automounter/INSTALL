@@ -8,15 +8,18 @@ following way: -parameter=value
 		The prefix that separates the files to be installed from the
 		base system.
 
+	-tmp=/tmp
+		The directory used for temporary files.
+	
 	-var=/var
 		The directory to keep changing files. This influences the
-		default of -run and -geli_images.
+		default of -run, -vartmp and -geli_images.
 
 	-run=/var/run
 		The directory where runtime information like the dynamically
 		stored amd.map or PID files will be created.
 
-	-tmp=/var/tmp
+	-vartmp=/var/tmp
 		The directory where files that should survive an unclean
 		shutdown, like the list of managed nodes,  will be created.
 
