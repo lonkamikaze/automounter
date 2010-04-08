@@ -109,9 +109,6 @@ mount_options=rw,noatime,noexec
 iso9660=cd9660
 iso9660_options=ro
 
-# Do not try to mount devices by ID.
-blacklist_nodes='*id/*'
-
 # Dirty fusefs bug workaround.
 evil_fuse=0
 
