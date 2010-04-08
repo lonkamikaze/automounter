@@ -1,3 +1,9 @@
+automounter-1.4 (9 April, 2010):
+  - Fix a bug that made amd forget about active mounts if an update occured.
+  - Clean up the code to add more device sources.
+  - Add file system type to device link, e.g. "da1.msdosfs".
+  - Add file system probing for unlabeled devices.
+
 automounter-1.3.6 (3 April, 2010):
   - Work around devices with an empty label.
   - Additionally offer access by device name instead of label.

@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.3.6
+version=1.4
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
@@ -38,10 +38,18 @@ static_map="%%MAP%%"
 devfs="%%DEVFS%%"
 
 # A file to remember for which partitions automounter has been configured.
-nodes="%%TMP%%/automounter.nodes"
+nodes="%%VARTMP%%/automounter.nodes"
 
 # A temporary file for the partitions of the last run.
-oldnodes="%%RUN%%/automounter.nodes.old"
+oldnodes="%%TMP%%/automounter.nodes.old"
+
+# A temporary mountpoint for probing.
+probe="%%TMP%%/automounter.probe"
+
+# Used to store a list of device that have already probed and shouldn't be
+# reprobed. This is used to prevent the adding of devices that have been
+# blacklisted through blacklist_nodes.
+probed="%%TMP%%/automounter.probed"
 
 # The pid of amd.
 pidfile="%%RUN%%/automounter.amd.pid"
@@ -107,6 +115,9 @@ blacklist_nodes='*id/*'
 # Dirty fusefs bug workaround.
 evil_fuse=0
 
+# A comma separated list of file system types to probe geom providers for.
+probe_types=ufs,msdosfs,iso9660,ntfs,ext2fs
+
 # Config file.
 config="%%PREFIX%%/etc/automounter.conf"
 if [ -e "$config" -a ! -d "$config" ]; then
@@ -127,11 +138,13 @@ IFS='
 #		[<label> <device>]*
 #
 rmLinks() {
-	local label device
+	local label device type
 
 	while [ -n "$1" ]; do
 		label="$1"
 		device="$2"
+		type="${label%%/*}"
+
 		# Prepare for the next iteration.
 		shift 2
 
@@ -141,14 +154,14 @@ rmLinks() {
 		# Remove the stale label.
 		echo "del label: <$label> from <$device>"
 		/bin/rm "$linkdir/$label"
-		/bin/rm "$linkdir/${devfs##*/}/$device"
+		/bin/rm "$linkdir/${devfs##*/}/$device.$type"
 		/bin/rmdir "$linkdir/${devfs##*/}" 2> "$devfs/null"
-		/bin/rmdir "$linkdir/${label%%/*}" 2> "$devfs/null"
+		/bin/rmdir "$linkdir/$type" 2> "$devfs/null"
 		/bin/rmdir "$mountdir/$label"
-		/bin/rmdir "$mountdir/${label%%/*}" 2> "$devfs/null"
+		/bin/rmdir "$mountdir/$type" 2> "$devfs/null"
 
 		# Forget keys belonging to this label.
-		keys="$(echo "$keys" | grep -Fv ";$label;")"
+		keys="$(echo "$keys" | /usr/bin/grep -Fv ";$label;")"
 	done
 }
 
@@ -160,11 +173,13 @@ rmLinks() {
 #		[<label> <device>]*
 #
 createLinks() {
-	local label device
+	local label device type
 
 	while [ -n "$1" ]; do
 		label="$1"
 		device="$2"
+		type="${label%%/*}"
+
 		# Prepare for the next iteration.
 		shift 2
 		
@@ -195,7 +210,7 @@ createLinks() {
 		/bin/mkdir -p "$linkdir/$type"
 		/bin/mkdir -p "$linkdir/${devfs##*/}"
 		/bin/ln -s "$directory/$hash" "$linkdir/$label"
-		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device"
+		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device.$type"
 	done
 }
 
@@ -270,42 +285,147 @@ geli_unmount() {
 }
 
 #
-# Updates the amd.map, the list of partitions and the mount links, if amd
-# is running.
+# This function checks whether the given device or label is blacklisted.
 #
-update() {
-	local device line partitions label type options hash \
-		owner mode key
+# @param 1
+#	The device name of the discovered node.
+# @param 2
+#	The label of the discovered node.
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+# @return
+#	0 if everything goes right
+#	1 if the device is blacklisted
+#	2 if the label is blacklisted
+#
+checkBlacklists() {
+	local device label
+	device="$1"
+	label="$2"
 
-	# Give geom some time to identify the label.
-	/bin/sleep "$update_delay"
-
-	# Don't do anything if amd is not running.
-	# This prevents automounter from starting too early from devd.
-	/bin/sync
-	if [ ! -e "$pidfile" ]; then
-		echo "automounter not started"
-		return 0
+	# Check weather the device is blacklisted.
+	if [ -n "$devices_blacklist" ]; then
+		eval "
+			case '$device' in
+				$devices_blacklist)
+					return 1
+				;;
+			esac
+		"
 	fi
 
-	# Start building a new map by copying the static one.
-	/bin/cp "$static_map" "$map"
+	# Check weather the partition is blacklisted.
+	if [ -n "$nodes_blacklist" ]; then
+		eval "
+			case '$label' in
+				$nodes_blacklist)
+					return 2
+				;;
+			esac
+		"
+	fi
+}
 
-	/bin/mkdir -p "$a"
-	/usr/bin/touch "$nodes"
-	/bin/mv "$nodes" "$oldnodes"
-	/usr/bin/touch "$nodes"
+# This function recors a node, creates the map file entry and calls
+# createLinks. The idea is to separate this code from the device discovery
+# code in the update() function.
+#
+# @param 1
+#	The device name of the discovered node.
+# @param 2
+#	The label of the discovered node.
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+# @return
+#	0 if everything goes right
+#	1 if the device is blacklisted
+#	2 if the label is blacklisted
+#	3 if the file system type is not known, i.e. the label matches label/*
+#
+writeNode() {
+	local device label type hash
+	device="$1"
+	label="$2"
 
-	# Change the blacklists' format into something that can be used in a
-	# case statement.
-	devices_blacklist="$(
-		echo "${blacklist_devs}" | /usr/bin/sed -E \
-			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
-	)"
-	nodes_blacklist="$(
-		echo "${blacklist_nodes}" | /usr/bin/sed -E \
-			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
-	)"
+	# Check weather device or label are blacklisted.
+	checkBlacklists "$device" "$label" || return $?
+
+	type="${label%%/*}"
+	mount="$type"
+	options="$mount_options"
+
+	# Skip on unknown types.
+	test "$type" = "label" && return 3
+
+	# Use the device name for empty labels.
+	test -z "${label#$type/}" && label="$label$device"
+
+	# Remember node.
+	echo "$device;$label" >> "$nodes"
+
+	# Create node hash for amd.
+	hash="$(/sbin/md5 -qs "$device;$label")"
+
+	echo "
+# $label
+$hash type:=program;fs:=\"$mountdir/$label\";\\
+mount:=\"$0 mount mount $hash\";\\
+unmount:=\"$0 umount umount $hash\"
+" >> "$map"
+
+	# Skip if already present.
+	if ! /usr/bin/grep -qFx "$device;$label" "$oldnodes"; then
+		# Create the media links.
+		createLinks "$label" "$device"
+	fi
+	return 0
+}
+
+#
+# Detect already mounted devices and call writeNode().
+#
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+#
+mountedDetect() {
+	local line device label
+
+	# Keep mounted nodes.
+	for line in $(/bin/cat "$oldnodes"); do
+		/usr/bin/grep -qFx "$line" "$nodes" && continue
+
+		device="${line%%;*}"
+		label="${line##*;}"
+
+		# Mounted nodes are not listed, because the label
+		# provider is removed as soon as the consumer is
+		# mounted directly, which is what is done since 1.3.6
+		# to avoid problems with broken labels.
+		if /sbin/mount | /usr/bin/grep -qF " $mountdir/$label "; then
+			writeNode "$device" "$label"
+			# Append to the list of already probed devices.
+			echo "$device$IFS$label" >> "$probed"
+			continue
+		fi
+	done
+}
+
+#
+# Detect labeled devices and call writeNode().
+#
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+#
+glabelDetect() {
+	local partitions line device label
 
 	# Create a list in the shape:
 	#
@@ -343,79 +463,162 @@ update() {
 		# Finally we can set up a mount.
 		label="$line"
 
-		# Check weather the device is blacklisted.
-		if [ -n "$devices_blacklist" ]; then
-			eval "
-				case '$device' in
-					$devices_blacklist)
-						device=
-						continue
-					;;
-				esac
-			"
-		fi
-
-		# Check weather the partition is blacklisted.
-		if [ -n "$nodes_blacklist" ]; then
-			eval "
-				case '$label' in
-					$nodes_blacklist)
-						device=
-						continue
-					;;
-				esac
-			"
-		fi
-
-		type="${label%%/*}"
-		mount="$type"
-		options="$mount_options"
-
-		# Skip on unknown types.
-		test "$type" = "label" && continue
-
-		# Use the device name for empty labels.
-		test -z "${label#$type/}" && label="$label$device"
-
-		# Remember node.
-		echo "$device;$label" >> "$nodes"
-
-		# Create node hash for amd.
-		hash="$(/sbin/md5 -qs "$device;$label")"
-
-		echo "
-# $label
-$hash type:=program;fs:=\"$mountdir/$label\";\\
-mount:=\"$0 mount mount $hash\";\\
-unmount:=\"$0 umount umount $hash\"
-" >> "$map"
-
-		# Skip if already present.
-		/usr/bin/grep -qFx "$device;$label" "$oldnodes" && continue
-
-		# Create the media links.
-		createLinks "$label" "$device"
-	done
-
-	# Clean up stale nodes, and keep mounted nodes.
-	for line in $(/bin/cat "$oldnodes"); do
-		/usr/bin/grep -qFx "$line" "$nodes" && continue
-
-		device="${line%%;*}"
-		label="${line##*;}"
-
-		# Mounted nodes are not listed by every version of glabel,
-		# so they have to protected.
-		if /sbin/mount | grep -qF " $mountdir/$label "; then
-			echo "$line" >> "$nodes"
+		# This is in the list of already probed devices.
+		if /usr/bin/grep -qFx "$label" "$probed"; then
 			continue
 		fi
+
+		# Do not probe device IDs.
+		case "$label" in
+		*id/*)
+			continue
+		esac
+
+		# Write the node.
+		writeNode "$device" "$label"
+
+		# Append to the list of already probed devices.
+		echo "$device$IFS$label" >> "$probed"
+	done
+}
+
+#
+# Detect labeled devices and call writeNode().
+#
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+#
+probeDetect() {
+	local devices device label type mount options
+
+	# Reformat probe_types.
+	probe_types="$(echo "$probe_types" | /usr/bin/egrep -o '[^,]+')"
+
+	/bin/mkdir -p "$probe"
+
+	# Create a list of devices.
+	devices="$(
+		/usr/sbin/gstat -b -I0 | \
+		/usr/bin/tail -n +3 | \
+		/usr/bin/sed -E 's/([[:space:]]+[0-9.]+){9}[[:space:]]*//' | \
+		/usr/bin/grep -v '/'
+	)"
+
+	# Add new mounts.
+	for device in $devices; do
+		# This is in the list of already probed devices.
+		if /usr/bin/grep -qFx "$device" "$probed"; then
+			continue
+		fi
+
+		# Try probing every file system type.
+		for type in $probe_types; do
+			label="$type/$device"
+			mount="$type"
+			options="$mount_options"
+
+			# Do not probe blacklisted devices.
+			if ! checkBlacklists "$device" "$label"; then
+				continue
+			fi
+
+			# Check for config file settings.
+			if [ -n "$(eval "echo \"\$$type\"")" ]; then
+				mount="$(eval "echo \"\$$type\"")"
+			fi
+			if [ -n "$(eval "echo \"\$${type}_options\"")" ]; then
+				options="$(eval "echo \"\$${type}_options\"")"
+			fi
+
+			# Add the label to the list of probed devices.
+			echo "$label" >> "$probed"
+
+			# Try to mount the device.
+			if /sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> /dev/null; then
+				# Write the node.
+				writeNode "$device" "$label"
+
+				# Unmount the probe.
+				/sbin/umount -f "$probe" 2> "$devfs/null"
+
+				# Skip the obsolete probes.
+				break
+			fi
+		done
+
+		# Append to the list of already probed devices.
+		echo "$device" >> "$probed"
+	done
+
+	/bin/rmdir "$probe"
+}
+
+#
+# Update the list of managed devices.
+#
+# @param probed
+#	A list of consumers and providers already probed, obey and contribute,
+#	so that blacklistings are not bypassed through other detectores.
+# @param devices_blacklist
+#	A list of glob patterns to check the device against.
+# @param nodes_blacklist
+#	A list glob patterns to check label nodes against.
+#
+# Updates the amd.map, the list of partitions and the mount links, if amd
+# is running.
+#
+update() {
+	local device line partitions label type options hash \
+		owner mode key detector
+
+	# Give geom some time to identify the label.
+	/bin/sleep "$update_delay"
+
+	# Don't do anything if amd is not running.
+	# This prevents automounter from starting too early from devd.
+	/bin/sync
+	if [ ! -e "$pidfile" ]; then
+		echo "automounter not started"
+		return 0
+	fi
+
+	# Start building a new map by copying the static one.
+	/bin/cp "$static_map" "$map"
+
+	/bin/mkdir -p "$a"
+	/usr/bin/touch "$nodes"
+	/bin/mv "$nodes" "$oldnodes"
+	/usr/bin/touch "$nodes"
+	echo > "$probed"
+
+	# Change the blacklists' format into something that can be used in a
+	# case statement.
+	devices_blacklist="$(
+		echo "${blacklist_devs}" | /usr/bin/sed -E \
+			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
+	)"
+	nodes_blacklist="$(
+		echo "${blacklist_nodes}" | /usr/bin/sed -E \
+			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
+	)"
+
+	# Run detectors.
+	for detector in mounted glabel probe; do
+		${detector}Detect
+	done
+
+	# Remove no longer listed nodes.
+	for line in $(/usr/bin/grep -vFx "$(/bin/cat "$nodes")" "$oldnodes"); do
+		device="${line%%;*}"
+		label="${line##*;}"
 
 		# Remove the stale media links.
 		rmLinks "$label" "$device"
 	done
 
-	# Finally restart amd.
+	# Finally reload amd map.
 	until [ -n "$(/bin/cat "$pidfile" 2> "$devfs/null")" ]; do
 		/bin/sleep 0.1
 	done
@@ -425,7 +628,7 @@ unmount:=\"$0 umount umount $hash\"
 	geli_update
 
 	# Clean up.
-	/bin/rm "$oldnodes" 2> "$devfs/null"
+	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
 
 	return 0
 }
@@ -464,7 +667,7 @@ geli_update() {
 		device="${line%%;*}"
 	
 		for key in $(
-			/bin/ls "$linkdir/${devfs##*/}/$device/$geli_keys/" \
+			/bin/ls "$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/" \
 			2> "$devfs/null"
 		); do
 			echo "add key: <$key> from <$label>"
@@ -621,8 +824,8 @@ list() {
 	if [ -z "$1" -o "$1" = "mounted" ]; then
 		for line in $(
 			# Format: <device>;<label>
-			/sbin/mount | grep "$mountdir" | \
-				sed -E "s,$devfs/(.+) on $mountdir/(.*) \(.*,\1;\2,1"
+			/sbin/mount | /usr/bin/grep "$mountdir" | \
+				/usr/bin/sed -E "s,$devfs/(.+) on $mountdir/(.*) \(.*,\1;\2,1"
 		); {
 			# If the given devices match a line just print
 			# it and we are done. Otherwise look for the label
@@ -767,6 +970,9 @@ case "$1" in
 				$2 "$3"
 				return $?
 			;;
+			umount)
+				$2 "$3"
+			;;
 			*)
 				echo "automounter: unknown directive '$2'."
 				echo "Usage: automounter" \
@@ -774,8 +980,12 @@ case "$1" in
 			;;
 		esac
 	;;
-	list | mount | umount)
+	list | mount)
 		$1 "$2"
+	;;
+	umount)
+		# Unmounts should not happen during updates.
+		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
 	;;
 	*)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@" || \

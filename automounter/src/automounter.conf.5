@@ -21,7 +21,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Feb 3, 2010
+.Dd Apr 9, 2010
 .Dt AUTOMOUNTER.CONF 5
 .Os
 .Sh NAME
@@ -78,7 +78,7 @@ blacklist_devs="ad*,acd*"
 .Ed
 .Pp
 Changing blacklist_devs takes effect after an update call.
-.It blacklist_nodes="*id/*"
+.It blacklist_nodes
 This allows blacklisting by mount names. Like blacklist_devs it is a ','
 separated list of Shell-Patterns. The following example blacklists all
 ufs partitions:
@@ -145,16 +145,31 @@ will create the mount points for amd.
 .Pp
 Like with linkdir it is required to stop automounter before changing mountdir
 to avoid an inconsistent state.
-.It nodes="%%RUN%%/automounter.nodes"
+.It nodes="%%VARTMP%%/automounter.nodes"
 This file is used to remember which mounts are currently managed by
 .Xr automounter 8 .
 .Pp
 It is required to stop automounter before changing nodes.
-.It oldnodes="%%RUN%%/automounter.nodes.old"
+.It oldnodes="%%TMP%%/automounter.nodes.old"
 A temporary file that is used to find out weather any mounts should be cleaned
 up.
 .Pp
 A change of oldnodes takes immediate effect.
+.It probe="%%TMP%%/automounter.probe"
+A directory used for mount attempts to probe file system types of unlabeled
+geom providers.
+.Pp
+Changing this takes immediate effect.
+.It probed="%%TMP%%/automounter.probed"
+A temporary file used to prevent the probing of geom providers whose labels
+have been blacklisted.
+.Pp
+Changing this takes immediate effect.
+.It probe_types=ufs,msdosfs,iso9660,ntfs,ext2fs
+A comma separated list of file system types to automatically probe for.
+This can be set to an empty value to turn probing off.
+.Pp
+Changing probe_types takes effect with the next update call.
 .It timeout=10
 The time out for aquiring the lock. If the time out passes without gaining
 the lock the instance of

@@ -26,9 +26,10 @@ for parameter; {
 }
 
 : ${prefix=/usr/local}
+: ${tmp=/tmp}
 : ${var=/var}
 : ${run=$var/run}
-: ${tmp=$var/tmp}
+: ${vartmp=$var/tmp}
 : ${media=/media}
 : ${devfs=/dev}
 : ${map=/etc/amd.map}
@@ -39,8 +40,9 @@ for parameter; {
 replace="
 %%PREFIX%%,$prefix
 %%MAN%%,$prefix/man
-%%RUN%%,$run
 %%TMP%%,$tmp
+%%RUN%%,$run
+%%VARTMP%%,$vartmp
 %%MEDIA%%,$media
 %%DEVFS%%,$devfs
 %%MAP%%,$map

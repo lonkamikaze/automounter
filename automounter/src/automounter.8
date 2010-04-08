@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Feb 3, 2010
+.Dd Apr 9, 2010
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -190,11 +190,6 @@ unmount them. This is a bug in fuse and neither automounter nor amd are to
 blame. A workaround for this bug is described in the
 .Xr automounter.conf 5
 manual page.
-.Pp
-Only properly labeled devices can be mounted. That means devices that have been
-labeled with
-.Xr glabel 8
-cannot be mounted, because the file system type cannot be detected.
 .Sh COMPATIBILITY
 The script has been tested on FreeBSD 8.0-STABLE
 .Sh SEE ALSO
