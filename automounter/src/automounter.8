@@ -1,5 +1,5 @@
 .\"
-.\" Copyright (c) 2008, 2009, 2010
+.\" Copyright (c) 2008 - 2010
 .\" Dominic Fandrey <kamikaze@bsdforen.de>
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -101,6 +101,122 @@ Automounter is made for the sake of comfort. Even though it reduces the
 probabilty of panics, the user is still oblieged to run
 .Xr mount 8
 to make sure a device is not mounted, before unplugging it.
+.Pp
+.Fx 7.1 and higher normally do no longer panic when a mounted device
+disappears, however it still remains
+.Dq bad style
+to unplug mounted media.
+.Sh IMPLEMENTATION NOTES
+This manual section is for the technically interested, to setup
+.Nm
+skip ahead to
+.Sx STARTUP .
+.Pp
+.Nm
+is not a daemon, instead it relies on
+.Xr amd 8
+to perform the daemonic task of dynamically mounting file systems.
+.Pp
+The purpuse of
+.Nm
+is to discover mountable file systems and create an
+.Xr amd 8
+map file. This also entails recording discoveries, creating a link structure
+in %%MEDIA%% and not loosing any devices during operation, which is the
+most difficult task of all.
+.Ss States Of Operation
+.Nm
+knows two states of operation, stopped and started. This is necessary to
+ensure that the system has been initialized before starting. The start
+call will be performed by the
+.Xr rc 8
+system, which will cause
+.Nm
+to start
+.Xr amd 8
+and perform the first update, which will discover available file systems.
+.Pp
+If properly configured premature update calls might be issued by
+.Xr devd 8
+during boot. These will be ignored.
+.Ss Device Discovery
+The first activity during an update call is device discovery. The entire
+configuration is rebuilt every time an update is called. To this
+end detector functions are called. The current detector functions are
+named mountedDetect(), glabelDetect() and probeDetect(). Each of these
+functions call the writeNode() function to record their findings and
+set up the necessary directory and link structure. The writeNode()
+function also performs the blacklisting checks. The detectors keep a list
+of already probed devices, to avoid redundant work.
+.Pp
+The mounted detector discovers the currently mounted devices. This is
+necessary, because mounting a glabel consumer destroys the glabel providers
+and thus prevents discovery by the glabel detector.
+The probe detector needs to be able to mount file systems, which does
+not work with already mounted geom providers, so it depends on this, too.
+.Pp
+The glabel detector uses the
+.Xr geom 8
+label class to identify file system types through labels. This is the
+traditional way of discovery for
+.Nm .
+.Pp
+The probe detector takes the remaining geom providers reported by the
+.Xr gstat 8
+tool and simply tries to mount them as different file system types until
+it succeeds or runs out of file system types. Successfully mounted
+devices are unmonted and setup with writeNode().
+.Pp
+Afterwards the mount detector is called again to catch mounts that
+occured after the first run and prevented detection through the other
+detectors. This is a very unlikely case, but not entirely impossible.
+.Ss Stale Mounts
+The next step is to compare the list of previously discovered devices
+and destroy the %%MEDIA%% link structure for each one that was not
+discovered this time.
+.Ss Reconfiguring AMD
+Now that the device discovery is completed,
+.Xr amd 8
+is sent SIGHUP to reload the newly built map file. From this moment on the
+discovered devices are available.
+.Ss Encrypted Providers
+Afterwards, if activated, the
+.Xr geli 8
+managing function is started.
+.Pp
+The geliUpdate() function checks whether it is currently managing keys
+residing on no longer present file systems. The keys are removed from the
+list of available keys.
+.Pp
+The next step is to search newly discovered file systems for keys.
+.Pp
+Afterwards a process for each encrypted file system whose key is no longer
+available is forked off. This process tries to destroy the
+.Xr geli 8
+provider, which is only possible if the file system is not mounted. Otherwise
+the process stays around until it has managed to destroy the provider or
+until the key becomes available again. After successful destruction of the
+provider the process starts a new update to ensure that keys provided by the
+destroyed provider are no longer listed as available.
+.Pp
+The step before last is to decrypt the providers for which new keys are
+available.
+.Pp
+Finally a new update is started, if the previous step succeeded in creating
+decrypted providers.
+.Ss Locking
+Because the sequential order of events is critical to retain consistency
+most of the operation of automounter is locked. I.e. start,
+update, stop and umount are synchronous operations.
+.Pp
+Umounts, because they may not occur during device discovery, the others
+because update runs may only occur one at a time. The locking ensures
+that too many updates at once (e.g. lots of diconnect/connect events
+reported by
+.Xr devd 8
+or the removal of several encrypted providers) will be called sequentially
+or time out at a time when it can be assumed safely, that the discoveries
+were already made by previous updates.
 .Sh STARTUP
 In order for the dynamic creation and destruction of mountpoints to work,
 it is necessary that
@@ -184,6 +300,7 @@ ln -s da0s1 "%%GELI_IMAGES%%/confidental"
 .It %%PREFIX%%/etc/automounter.conf
 .It %%PREFIX%%/etc/automounter.conf.sample
 .It %%PREFIX%%/etc/rc.d/automounter
+.El
 .Sh BUGS/UNEXPECTED BEHAVIOUR
 Fuse based filesystems like ntfs-3g close all openened files when amd tries to
 unmount them. This is a bug in fuse and neither automounter nor amd are to

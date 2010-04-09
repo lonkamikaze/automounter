@@ -45,8 +45,10 @@
 #mount_options=$mount_options,sync
 
 ### 
-# Uncomment the following tu use the fusefs ntfs implemention of the NTFS file
-# system, with root:operater 0775 access for directories and 0664 for files.
+# Uncomment the following to use the fusefs ntfs implemention of the NTFS file
+# system with root:operater 0775 access for directories and 0664 for files,
+# synchronous unmount (important to be sure that you can unplug ntfs formatted
+# media) and UTF-8 encoded file names.
 #
 
 #ntfs_options=rw,noatime,mountprog=%%PREFIX%%/bin/ntfs-3g,sync_unmount
@@ -56,7 +58,8 @@
 # option.
 
 #ntfs=ntfs-3g
-#ntfs_options=rw,noatime,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
+#ntfs_options=rw,noatime,sync_unmount
+#ntfs_options=$ntfs_options,gid=5,umask=113,dmask=002,locale=en_GB.UTF-8
 
 ###
 # Uncomment the following line to activate a very evil bug workaround for
