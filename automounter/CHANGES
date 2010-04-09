@@ -1,3 +1,10 @@
+automounter-devel (, 2010):
+  - Add detect_glabel and detect_probe switches to allow the deactivation of
+    probing mechanisms.
+  - Be more safe about not loosing mounted file systems.
+  - Minor cleanups.
+  - Add an IMPLEMENTATION NOTES section to the automounter(8) manual page.
+
 automounter-1.4 (9 April, 2010):
   - Fix a bug that made amd forget about active mounts if an update occured.
   - Clean up the code to add more device sources.

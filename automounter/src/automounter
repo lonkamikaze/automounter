@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4
+version=1.4.1
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
@@ -38,6 +38,15 @@ static_map="%%MAP%%"
 devfs="%%DEVFS%%"
 
 # A file to remember for which partitions automounter has been configured.
+#
+# Lines in the file conform to the following format:
+#	<device>;<label>
+#
+# From the glabel detector perspective <device> is the geom consumer and
+# <label> the provider.
+#
+# From the probe detector perspective <device> is the geom provider and
+# <label> is a virtual convenience label.
 nodes="%%VARTMP%%/automounter.nodes"
 
 # A temporary file for the partitions of the last run.
@@ -101,6 +110,12 @@ timeout=10
 # The delay before the update command takes effect. This is necessary
 # to ensure that geom knows about new labels.
 update_delay=2
+
+# If set glabel file system detection is turned off.
+detect_glabel=1
+
+# If set probe file system detection is turned off.
+detect_probe=1
 
 # The default mount options.
 mount_options=rw,noatime,noexec
@@ -212,7 +227,7 @@ createLinks() {
 }
 
 #
-# This function is forked by geli_update to unmount images that do not longer
+# This function is forked by geliUpdate() to unmount images that do not longer
 # have a key available.
 #
 # @param 1
@@ -222,7 +237,7 @@ createLinks() {
 # @param 3
 #	The device the geli provider is available as.
 #
-geli_unmount() {
+geliUnmount() {
 	local label name device
 	label="$1"
 	name="$2"
@@ -383,6 +398,42 @@ unmount:=\"$0 umount umount $hash\"
 }
 
 #
+# Make a trial mount in the probe directory. Make sure to run probeUnmount
+# after succeeding.
+#
+# @param 1
+#	The file system type to use for mounting.
+# @param 2
+#	The device to mount.
+# @return
+#	Whatever the mount command returns, 0 for success,
+#	something else otherwise.
+#
+probeMount() {
+	local type mount options device
+	type="$1"
+	device="$2"
+
+	# Check for config file settings.
+	if [ -n "$(eval "echo \"\$$type\"")" ]; then
+		mount="$(eval "echo \"\$$type\"")"
+	fi
+	if [ -n "$(eval "echo \"\$${type}_options\"")" ]; then
+		options="$(eval "echo \"\$${type}_options\"")"
+	fi
+
+	# Run the mount command.
+	/sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> /dev/null
+}
+
+#
+# Force unmount a probe mount.
+#
+probeUnmount() {
+	/sbin/umount -f "$probe" 2> "$devfs/null"
+}
+
+#
 # Detect already mounted devices and call writeNode().
 #
 # @param devices_blacklist
@@ -417,11 +468,14 @@ mountedDetect() {
 # Detect labeled devices and call writeNode().
 #
 # @param devices_blacklist
-#	A list of glob patterns to check the device against.
+#	A list of glob patterns to check the devices against.
 # @param nodes_blacklist
 #	A list glob patterns to check label nodes against.
 #
 glabelDetect() {
+	# Check whether glabel based file system discovery has been disabled.
+	test "$detect_glabel" != "1" && return 0
+
 	local partitions line device label
 
 	# Create a list in the shape:
@@ -483,11 +537,14 @@ glabelDetect() {
 # Detect labeled devices and call writeNode().
 #
 # @param devices_blacklist
-#	A list of glob patterns to check the device against.
+#	A list of glob patterns to check the devices against.
 # @param nodes_blacklist
 #	A list glob patterns to check label nodes against.
 #
 probeDetect() {
+	# Check whether probing based file system discovery has been disabled.
+	test "$detect_probe" != "1" && return 0
+
 	local devices device label type mount options
 
 	# Reformat probe_types.
@@ -533,20 +590,20 @@ probeDetect() {
 			echo "$label" >> "$probed"
 
 			# Try to mount the device.
-			if /sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> /dev/null; then
+			if probeMount "$type" "$device"; then
+				# Unmount the probe.
+				probeUnmount
+
 				# Write the node.
 				writeNode "$device" "$label"
 
-				# Unmount the probe.
-				/sbin/umount -f "$probe" 2> "$devfs/null"
+				# Append to the list of already probed devices.
+				echo "$device" >> "$probed"
 
-				# Skip the obsolete probes.
+				# Skip the following probes on this device.
 				break
 			fi
 		done
-
-		# Append to the list of already probed devices.
-		echo "$device" >> "$probed"
 	done
 
 	/bin/rmdir "$probe"
@@ -558,17 +615,14 @@ probeDetect() {
 # @param probed
 #	A list of consumers and providers already probed, obey and contribute,
 #	so that blacklistings are not bypassed through other detectores.
-# @param devices_blacklist
-#	A list of glob patterns to check the device against.
-# @param nodes_blacklist
-#	A list glob patterns to check label nodes against.
 #
 # Updates the amd.map, the list of partitions and the mount links, if amd
 # is running.
 #
 update() {
-	local device line partitions label type options hash \
-		owner mode key detector
+	local device line partitions label type options
+	local hash owner mode key detector
+	local devices_blacklist nodes_blacklist
 
 	# Give geom some time to identify the label.
 	/bin/sleep "$update_delay"
@@ -594,15 +648,18 @@ update() {
 	# case statement.
 	devices_blacklist="$(
 		echo "${blacklist_devs}" | /usr/bin/sed -E \
+			-e 's/^[[:space:]]*,//' -e 's/,[[:space:]]*$//' \
 			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
 	)"
 	nodes_blacklist="$(
 		echo "${blacklist_nodes}" | /usr/bin/sed -E \
+			-e 's/^[[:space:]]*,//' -e 's/,[[:space:]]*$//' \
 			-e 's/,/|/g' -e 's,([[:space:]\\]),\\\1,g'
 	)"
 
 	# Run detectors.
-	for detector in mounted glabel probe; do
+	for detector in mounted glabel probe mounted; do
+		/bin/sync
 		${detector}Detect
 	done
 
@@ -622,7 +679,7 @@ update() {
 	/bin/kill -HUP "$(/bin/cat "$pidfile" 2> "$devfs/null")"
 
 	# Update geli managed mounts.
-	geli_update
+	geliUpdate
 
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
@@ -633,7 +690,7 @@ update() {
 #
 # Update geli encrypted providers. Requires the oldnodes file to be intact.
 #
-geli_update() {
+geliUpdate() {
 	# Do not run if geli features are not activated.
 	test "$geli" != "1" && return 0
 
@@ -662,10 +719,9 @@ geli_update() {
 		/usr/bin/grep -qFx "$line" "$oldnodes" && continue
 		label="${line#*;}"
 		device="${line%%;*}"
-	
+
 		for key in $(
-			/bin/ls "$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/" \
-			2> "$devfs/null"
+			/bin/ls "$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/" 2> "$devfs/null"
 		); do
 			echo "add key: <$key> from <$label>"
 			echo "$label;$key" >> "$geli_availablekeys"
@@ -690,7 +746,7 @@ geli_update() {
 		fi
 
 		# This image is stale. Fork a process that tries to unmount it.
-		geli_unmount "$label" "$name" "$device" &
+		geliUnmount "$label" "$name" "$device" &
 	done
 	/usr/bin/touch "$geli_nodes"
 	/bin/rm "$geli_oldnodes"
@@ -710,7 +766,7 @@ geli_update() {
 
 		# Being here means that this image has not yet been made
 		# available. So it is time to give it a try.
-		key="$linkdir/$label/$geli_keys/$name"
+		key="$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/$name"
 
 		# Get the device to attach.
 		if [ -L "$geli_images/$name" -a ! -e "$geli_images/$name" ]

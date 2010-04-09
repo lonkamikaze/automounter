@@ -87,6 +87,18 @@ blacklist_nodes="ufs/*"
 .Ed
 .Pp
 Changing blacklist_nodes takes effect after an update call.
+.It detect_glabel=1
+If set to 0 or any other value not 1, discovering file systems through the
+geom label class is deactivated.
+.Pp
+This setting takes effect with the next update call, excepting already mounted
+file systems.
+.It detect_probe=1
+If set to 0 or any other value not 1, discovering file systems through probing
+is deactivated.
+.Pp
+This setting takes effect with the next update call, excepting already mounted
+file systems.
 .It devfs="%%DEVFS%%"
 The location of the
 .Xr devfs 5 .
@@ -167,7 +179,6 @@ have been blacklisted.
 Changing this takes immediate effect.
 .It probe_types=ufs,msdosfs,iso9660,ntfs,ext2fs
 A comma separated list of file system types to automatically probe for.
-This can be set to an empty value to turn probing off.
 .Pp
 Changing probe_types takes effect with the next update call.
 .It timeout=10
