@@ -285,7 +285,7 @@ geliUnmount() {
 		esac
 	done
 	# Update labels in a locked fashion.
-	$0 update &
+	$0 update delay &
 
 	# Hang around to remove the device node for the image.
 	# Unless it's a device link.
@@ -612,12 +612,11 @@ probeDetect() {
 #
 # Update the list of managed devices.
 #
-# @param probed
-#	A list of consumers and providers already probed, obey and contribute,
-#	so that blacklistings are not bypassed through other detectores.
-#
 # Updates the amd.map, the list of partitions and the mount links, if amd
 # is running.
+#
+# @param 1
+#	If set delay the update.
 #
 update() {
 	local device line partitions label type options
@@ -625,7 +624,7 @@ update() {
 	local devices_blacklist nodes_blacklist
 
 	# Give geom some time to identify the label.
-	/bin/sleep "$update_delay"
+	test -n "$1" && /bin/sleep "$update_delay"
 
 	# Don't do anything if amd is not running.
 	# This prevents automounter from starting too early from devd.
@@ -766,7 +765,7 @@ geliUpdate() {
 
 		# Being here means that this image has not yet been made
 		# available. So it is time to give it a try.
-		key="$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/$name"
+		key="$linkdir/$label/$geli_keys/$name"
 
 		# Get the device to attach.
 		if [ -L "$geli_images/$name" -a ! -e "$geli_images/$name" ]
@@ -782,8 +781,9 @@ geliUpdate() {
 		fi
 
 		# Attempt to attach (decrypt) file.
-		/usr/bin/cd "$(/usr/bin/dirname "$key")"
-		if /sbin/geli attach -p -k "$key" "$device"; then
+		if cd "$(/usr/bin/dirname "$key")" \
+			&& /sbin/geli attach -p -k "$key" "$device"
+		then
 			# Remember success.
 			echo "add encrypted provider: <$name> as <$device>" \
 				"with key from <$label>"
@@ -797,7 +797,7 @@ geliUpdate() {
 
 	# Restart amd if a change has been made.
 	if [ -n "$update_amd" ]; then
-		update
+		update delay
 	fi
 
 	return 0
@@ -806,11 +806,11 @@ geliUpdate() {
 #
 # Setup amd if not yet running and call update.
 #
+# @param 1
+#	If set the update call is forked into the background.
+#
 start() {
 	local pid
-
-	# There is no need to give geom time to update labels.
-	update_delay=0
 
 	if [ ! -e "$pidfile" ]; then
 		/bin/cp "$static_map" "$map"
@@ -818,7 +818,11 @@ start() {
 			"$directory" "$map" > "$pidfile" &
 	fi
 
-	$0 update &
+	if [ -n "$1" ]; then
+		$0 update &
+	else
+		update
+	fi
 }
 
 #

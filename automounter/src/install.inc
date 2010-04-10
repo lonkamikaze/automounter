@@ -2,6 +2,7 @@ files="
 automounter,0755,%%PREFIX%%/sbin/automounter
 automounter.rc,0755,%%PREFIX%%/etc/rc.d/automounter
 automounter.conf.sample,0644,%%PREFIX%%/etc/automounter.conf.sample
+devd.conf,0644,%%PREFIX%%/etc/devd/automounter.conf
 automounter.8,0644,%%MAN%%/man8/automounter.8.gz
 automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 "

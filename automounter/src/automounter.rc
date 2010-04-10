@@ -35,7 +35,7 @@ automounter_precmd()
 }
 
 start_precmd="automounter_precmd"
-start_cmd="$command start"
+start_cmd="$command start fork"
 stop_cmd="$command stop"
 update_cmd="$command update"
 

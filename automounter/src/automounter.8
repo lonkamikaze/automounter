@@ -230,27 +230,17 @@ following line in
 To start it without rebooting run the following command:
 .Pp
 	%%PREFIX%%/etc/rc.d/automounter start
-.Sh DYNAMIC MOUNTS
-To dynamically adjust mounts when USB storage devices appear add the
-following lines to
-.Xr devd.conf 5 :
-.Bd -literal -offset indent
-# Call automounter to update mounts.
-attach 100 {
-	device-name "umass[0-9]+";
-	action "%%PREFIX%%/sbin/automounter update";
-};
-detach 100 {
-	device-name "umass[0-9]+";
-	action "%%PREFIX%%/sbin/automounter update";
-};
-.Ed
+.Sh USB DISCOVERY
+As of
+.Nm
+1.4.1 it is no longer necessary to add an entry to the
+.Xr devd.conf 5
+file to automatically update available devices when USB mass storage devices
+appear or disappear. However, after the first installation, it is still
+necessary to restart
+.Xr devd 8 :
 .Pp
-If you want to see the output on the first terminal you can change the action
-in the following way:
-.Bd -literal -offset indent
-"%%PREFIX%%/sbin/automounter update > /dev/ttyv0 2>&1"
-.Ed
+	/etc/rc.d/devd restart
 .Sh ACCESS RIGHTS
 The mount point inherits the access rights of the label device node. This is
 useful for file systems that don't support proper user management like msdosfs.
@@ -299,6 +289,7 @@ ln -s da0s1 "%%GELI_IMAGES%%/confidental"
 .It %%PREFIX%%/sbin/automounter
 .It %%PREFIX%%/etc/automounter.conf
 .It %%PREFIX%%/etc/automounter.conf.sample
+.It %%PREFIX%%/etc/devd/automounter.conf
 .It %%PREFIX%%/etc/rc.d/automounter
 .El
 .Sh BUGS/UNEXPECTED BEHAVIOUR

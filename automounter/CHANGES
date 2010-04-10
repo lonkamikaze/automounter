@@ -4,6 +4,8 @@ automounter-devel (, 2010):
   - Be more safe about not loosing mounted file systems.
   - Minor cleanups.
   - Add an IMPLEMENTATION NOTES section to the automounter(8) manual page.
+  - Add a devd.conf file, so that manual setup of automatic USB discovery is
+    not required.
 
 automounter-1.4 (9 April, 2010):
   - Fix a bug that made amd forget about active mounts if an update occured.
