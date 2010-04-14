@@ -142,6 +142,20 @@ devfs="${devfs%/}"
 IFS='
 '
 
+# Native error return codes.
+readonly ERR_CMD_UNKNOWN=1
+readonly ERR_NOT_STARTED=2
+readonly ERR_MOUNT_FS_MISSING=3
+readonly ERR_UMOUNT_ACTIVE=4
+readonly ERR_LIST_LOCKED=5
+
+# Locking error return codes.
+readonly EX_USAGE=64
+readonly EX_SOFTWARE=70
+readonly EX_OSERR=71
+readonly EX_CANTCREAT=73
+readonly EX_TEMPFAIL=75
+
 #
 # Removes a set of media links.
 #
@@ -201,7 +215,7 @@ createLinks() {
 
 		# Inherit mount node owner from device.
 		/usr/sbin/chown "$(
-			/usr/bin/stat -f %u:%g "$devfs/$label" 2> /dev/null \
+			/usr/bin/stat -f %u:%g "$devfs/$label" 2> "$devfs/null" \
 				|| /usr/bin/stat -f %u:%g "$devfs/$device"
 		)" "$mountdir/$label"
 
@@ -210,7 +224,7 @@ createLinks() {
 		/bin/chmod "$(
 			(
 				/usr/bin/stat -f %p "$devfs/$label" \
-				2> /dev/null \
+				2> "$devfs/null" \
 					|| /usr/bin/stat -f %p "$devfs/$device"
 			) | /usr/bin/sed -e 's/.//1' \
 				-e 's/2/3/g' \
@@ -423,7 +437,7 @@ probeMount() {
 	fi
 
 	# Run the mount command.
-	/sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> /dev/null
+	/sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> "$devfs/null"
 }
 
 #
@@ -451,15 +465,14 @@ mountedDetect() {
 		device="${line%%;*}"
 		label="${line##*;}"
 
-		# Mounted nodes are not listed, because the label
-		# provider is removed as soon as the consumer is
-		# mounted directly, which is what is done since 1.3.6
-		# to avoid problems with broken labels.
-		if /sbin/mount | /usr/bin/grep -qF " $mountdir/$label "; then
+		# Mounted nodes will not be detected by glabelDetect(),
+		# because the label provider is removed as soon as the
+		# consumer is mounted directly, which is what is done since
+		# 1.3.6 to avoid problems with broken labels.
+		if /sbin/mount | /usr/bin/grep -qF "on $mountdir/$label ("; then
 			writeNode "$device" "$label"
 			# Append to the list of already probed devices.
 			echo "$device$IFS$label" >> "$probed"
-			continue
 		fi
 	done
 }
@@ -617,22 +630,21 @@ probeDetect() {
 #
 # @param 1
 #	If set delay the update.
+# @return
+#	ERR_NOT_STARTED, if automounter has not been started, otherwise 0.
 #
 update() {
 	local device line partitions label type options
 	local hash owner mode key detector
 	local devices_blacklist nodes_blacklist
 
-	# Give geom some time to identify the label.
-	test -n "$1" && /bin/sleep "$update_delay"
-
 	# Don't do anything if amd is not running.
 	# This prevents automounter from starting too early from devd.
 	/bin/sync
-	if [ ! -e "$pidfile" ]; then
-		echo "automounter not started"
-		return 0
-	fi
+	test -e "$pidfile" || return $ERR_NOT_STARTED
+
+	# Give geom some time to identify the label.
+	test -n "$1" && /bin/sleep "$update_delay"
 
 	# Start building a new map by copying the static one.
 	/bin/cp "$static_map" "$map"
@@ -864,7 +876,13 @@ stop() {
 }
 
 #
-# List mounted, labels, keys, images or one of these categories.
+# List mounted, labels, keys, encrypted providers or one of these categories.
+#
+# @param 1
+#	Either "mounted", "labels", "keys" or "encrypted". If given only this
+#	category will be listed.
+# @return
+#	ERR_LIST_LOCKED if the lock is currently held, 0 otherwise.
 #
 list() {
 	# This is not a reliable way to ensure that everything will go right,
@@ -872,7 +890,7 @@ list() {
 	# and not aquiring the lock allows everyone to use the list command.
 	if [ -e "$lock" ]; then
 		echo "Locked."
-		return 1
+		return $ERR_LIST_LOCKED
 	fi
 
 	local image device hash label line
@@ -930,10 +948,63 @@ list() {
 }
 
 #
+# List data in machine readable form using absolute path names.
+#
+# @param 1
+#	Either "mounted", "llinks" for labeled links or "dlinks" for device
+#	links.
+# @return
+#	ERR_LIST_LOCKED if the lock is currently held, 0 otherwise.
+#
+mlist() {
+	# This is not a reliable way to ensure that everything will go right,
+	# but the probabality that bogus output will appear is rather low
+	# and not aquiring the lock allows everyone to use the list command.
+	if [ -e "$lock" ]; then
+		return $ERR_LIST_LOCKED
+	fi
+
+	# Print mounted file systems.
+	if [ -z "$1" -o "$1" = "mounted" ]; then
+		for line in $(
+			# Format: <device>;<label>
+			/sbin/mount | /usr/bin/grep "$mountdir" | \
+				/usr/bin/sed -E "s,$devfs/(.+) on $mountdir/(.*) \(.*,\1;\2,1"
+		); {
+			# If the given devices match a line just print
+			# it and we are done. Otherwise look for the label
+			# with a different device, which can happen with
+			# fuse devices.
+			if /usr/bin/grep -qFx "$line" "$nodes"; then
+				echo "$mountdir/${line#*;}"
+			elif $(line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"); then
+				device="${line%%;*}"
+				echo "$mountdir/${line#*;}"
+			fi
+		}
+	fi
+
+	# Print the labels that are available for mounting.
+	if [ -z "$1" -o "$1" = "llinks" ]; then
+		/usr/bin/sed "s,[^;]*;,$linkdir/," "$nodes" 2> "$devfs/null"
+	fi
+
+	# Print the devices that are available for mounting.
+	if [ -z "$1" -o "$1" = "dlinks" ]; then
+		/usr/bin/sed -E "s,([^;]*);([^/]*).*,$linkdir/${devfs##*/}/\1.\2," "$nodes" 2> "$devfs/null"
+	fi
+
+	return 0
+}
+
+#
 # This calls the apropriate mount command for a given hash.
 #
 # @param $1
 #	The hash over the name of the device node to mount.
+# @return
+#	ERR_MOUNT_FS_MISSING if the file system to mount cannot be identified,
+#	otherwise "exec /sbin/mount" is called.
 #
 mount() {
 	local label labels hash device
@@ -965,7 +1036,7 @@ mount() {
 		fi
 	done
 	echo "File system not found."
-	return 1
+	return $ERR_MOUNT_FS_MISSING
 }
 
 #
@@ -974,15 +1045,20 @@ mount() {
 #
 # @param $1
 #	The hash over the name of the device node to unmount.
+# @return
+#	ERR_UMOUNT_ACTIVE if the file system to be unmounted is active,
+#	otherwise "exec /sbin/umount" is called.
 #
 umount() {
-	local label labels
+	local label device labels
 
 	# Find the label for the current hash.
 	label=
+	device=
 	labels="$(/bin/cat "$nodes")"
 	for label in $labels; do
 		if [ "$1" = "$(/sbin/md5 -qs "$label")" ]; then
+			device="${label%%;*}"
 			label="${label#*;}"
 			break
 		else
@@ -1005,17 +1081,26 @@ umount() {
 		# then we will NOT unmount.
 		if [ "$type" = "fusefs" ]; then
 			/usr/bin/fstat | \
-				/usr/bin/grep -qE '\?\(fuse\)' && exit 1
+				/usr/bin/grep -qE '\?\(fuse\)' && return $ERR_UMOUNT_ACTIVE
 		fi
 	fi
 
 	# Don't attempt umounts for active file systems.
-	if /usr/bin/fstat | /usr/bin/grep -F " $mountdir/$label " > /dev/null; then
-		exit 1
+	if /usr/bin/fstat | /usr/bin/grep -F " $mountdir/$label " > "$devfs/null"; then
+		return $ERR_UMOUNT_ACTIVE
+	fi
+
+	# If the device is missing (i.e. it was removed while being mounted),
+	# force umount.
+	if [ ! -e "$devfs/$device" ]; then
+		echo "automounter: Force unmounting missing <$label> from <$device>"
+		# Schedule an update.
+		$0 update 1 &
+		exec /sbin/umount -f "$mountdir/$label" 2> "$devfs/null"
 	fi
 
 	# Give over to the system unmount command.
-	exec /sbin/umount "$mountdir/$label" 2> /dev/null
+	exec /sbin/umount "$mountdir/$label" 2> "$devfs/null"
 }
 
 # Ensure the lock is aquired. And run the requested command.
@@ -1023,30 +1108,44 @@ case "$1" in
 	locked)
 		case "$2" in
 			start | update | stop)
-				echo "automounter $2: $(/bin/date -u)"
 				$2 "$3"
-				return $?
+				return
 			;;
 			umount)
 				$2 "$3"
+				return
 			;;
 			*)
-				echo "automounter: unknown directive '$2'."
-				echo "Usage: automounter" \
-					"(start|update|list|stop)"
+				cat << HERE-DOC
+automounter: unknown directive '$2'.
+Usage:	automounter (start | update | list | mlist | stop)
+	automounter list [mounted | labels | keys | encrypted]
+	automounter mlist [mounted | llinks | dlinks]
+HERE-DOC
+				return $ERR_CMD_UNKNOWN
 			;;
 		esac
 	;;
-	list | mount)
+	list | mlist | mount)
 		$1 "$2"
+		return
 	;;
 	umount)
 		# Unmounts should not happen during updates.
 		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
 	;;
 	*)
-		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@" || \
-			echo "Lock could not be aquired:" "$@"
+		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
+		status=$?
+		case $status in
+			0 | $ERR_CMD_UNKNOWN | $ERR_NOT_STARTED | $ERR_MOUNT_FS_MISSING | $ERR_UMOUNT_ACTIVE)
+				# Silent success/fail
+			;;
+			$EX_USAGE | $EX_SOFTWARE | $EX_OSERR | $EX_CANTCREAT | $EX_TEMPFAIL)
+				echo "automounter: Lock could not be aquired:" "$@"
+			;;
+		esac
+		return $status
 	;;
 esac
 

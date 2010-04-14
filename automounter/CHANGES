@@ -6,6 +6,10 @@ automounter-devel (, 2010):
   - Add an IMPLEMENTATION NOTES section to the automounter(8) manual page.
   - Add a devd.conf file, so that manual setup of automatic USB discovery is
     not required.
+  - Create less noisy output and return exit codes instead.
+  - Handle the removal of mounted devices gracefully.
+  - Add the mlist command for machine readable listing of media links and
+    mount points.
 
 automounter-1.4 (9 April, 2010):
   - Fix a bug that made amd forget about active mounts if an update occured.
