@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Apr 9, 2010
+.Dd Apr 14, 2010
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -32,10 +32,13 @@
 .Nd Dynamically configure amd for existing devices.
 .Sh SYNOPSIS
 .Nm
-.Pq Ar start | Ar update | Ar list | Ar stop
+.Pq Ar start | Ar update | Ar list | Ar mlist | Ar stop
 .Nm
 .Ar list
 .Op Ar mounted | Ar labels | Ar keys | Ar encrypted
+.Nm
+.Ar mlist
+.Op Ar mounted | Ar llinks | Ar dlinks
 .Sh DESCRIPTION
 The
 .Nm
@@ -59,7 +62,7 @@ The script also supports polling the keys of
 .Xr geli 8
 encrypted partitions and images from managed media.
 More information is available in the
-.Ar GELI
+.Sx GELI
 section of this manual page.
 .Pp
 This manual page describes how to set up
@@ -84,11 +87,21 @@ Lists the labels of currently managed mounts, the keys found on the media and
 the encrypted providers that are available.
 .It Ar list mounted
 Lists the currently mounted labels.
+.It Ar list labels
+List currently available labels.
 .It Ar list keys
 Lists the keys that were found on the managed media.
 .It Ar list encrypted
 Lists the images and devices that are available. If attached, the media that
 contains the key will also be listed.
+.It Ar mlist
+List data in a machine readable form as newline separated absolute path names.
+.It Ar mlist mounted
+List the paths of mounted file systems.
+.It Ar mlist llinks
+List label named links to file systems.
+.It Ar mlist dlinks
+List device named links to file systems.
 .It Ar stop
 Unmount everything, stop
 .Xr amd 8
@@ -103,9 +116,12 @@ probabilty of panics, the user is still oblieged to run
 to make sure a device is not mounted, before unplugging it.
 .Pp
 .Fx 7.1 and higher normally do no longer panic when a mounted device
-disappears, however it still remains
+disappears and
+.Nm
+handles this case gracefully, however it still remains
 .Dq bad style
-to unplug mounted media.
+to unplug mounted media and might leave your file system in an inconsistent
+state.
 .Sh IMPLEMENTATION NOTES
 This manual section is for the technically interested, to setup
 .Nm
@@ -217,6 +233,29 @@ reported by
 or the removal of several encrypted providers) will be called sequentially
 or time out at a time when it can be assumed safely, that the discoveries
 were already made by previous updates.
+.Ss Mounting and Unmounting
+The
+.Xr amd 8
+map file is created so that file systems are mounted and unmounted through
+.Nm .
+This has several advantages, the first of which is that
+.Xr amd 8
+cannot deal with spaces in
+.Xr mount 8
+and
+.Xr umount 8
+parameters. To permit human readable mount directories, the mount and umount
+commands are called with a hash, which automounter than interprets as one of
+its managed file systems.
+.Pp
+The second advatage is that
+.Nm
+can thus intercept unmounts. This is used to enforce locked umounts as well
+as preventing unmount attempts to file systems in use, especially with the
+fuse hack in place. But it is also used to force unmount file systems whose
+devices are no longer present and issue an update call, because the
+disappearing of the device was previously missed, due to mounted file
+systems being protected from disappearing.
 .Sh STARTUP
 In order for the dynamic creation and destruction of mountpoints to work,
 it is necessary that
@@ -236,9 +275,9 @@ As of
 1.4.1 it is no longer necessary to add an entry to the
 .Xr devd.conf 5
 file to automatically update available devices when USB mass storage devices
-appear or disappear. However, after the first installation, it is still
-necessary to restart
-.Xr devd 8 :
+appear or disappear. However, it is still necessary to restart
+.Xr devd 8
+after installation:
 .Pp
 	/etc/rc.d/devd restart
 .Sh ACCESS RIGHTS
@@ -292,6 +331,26 @@ ln -s da0s1 "%%GELI_IMAGES%%/confidental"
 .It %%PREFIX%%/etc/devd/automounter.conf
 .It %%PREFIX%%/etc/rc.d/automounter
 .El
+.Sh EXIT CODES
+Additionally to the error codes listed here,
+.Nm
+can return all the errors listed in the
+.Xr lockf 1
+manual.
+.Bl -tag -width indent
+.It ERR_CMD_UNKNOWN 1
+Returned if started with an unknown command parameter.
+.It ERR_NOT_STARTED 2
+Returned if
+.Nm
+has not yet been started.
+.It ERR_MOUNT_FS_MISSING 3
+Returned by the mount command if the requested file system cannot be found.
+.It ERR_UMOUNT_ACTIVE 4
+Returned by the umount command if the file system to unmount is active.
+.It ERR_LIST_LOCKED 5
+Returned if the list command is issued during an ongoing update.
+.El
 .Sh BUGS/UNEXPECTED BEHAVIOUR
 Fuse based filesystems like ntfs-3g close all openened files when amd tries to
 unmount them. This is a bug in fuse and neither automounter nor amd are to
@@ -301,12 +360,7 @@ manual page.
 .Sh COMPATIBILITY
 The script has been tested on FreeBSD 8.0-STABLE
 .Sh SEE ALSO
-.Xr automounter.conf 5 ,
-.Xr amd 8 ,
-.Xr rc 8 ,
-.Xr rc.conf 5 ,
-.Xr devd.conf 5 ,
-.Xr devfs.rules 5 ,
-.Xr geli 8
+.Xr amd 8 , Xr automounter.conf 5 , Xr rc 8 , Xr rc.conf 5 , Xr devd.conf 5 ,
+.Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 and Xr umount 8
 .Sh AUTHOR
 Dominic Fandrey <kamikaze@bsdforen.de>
