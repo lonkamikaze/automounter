@@ -1,4 +1,4 @@
-automounter-devel (, 2010):
+automounter-1.4.1 (14 April, 2010):
   - Add detect_glabel and detect_probe switches to allow the deactivation of
     probing mechanisms.
   - Be more safe about not loosing mounted file systems.
