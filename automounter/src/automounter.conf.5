@@ -93,6 +93,13 @@ geom label class is deactivated.
 .Pp
 This setting takes effect with the next update call, excepting already mounted
 file systems.
+.It detect_iso9660=1
+If set to 0 or any other value not 1, assuming that devices matching the
+.Pa iso9660_devs
+pattern are optical disk drives is turned off.
+.Pp
+This setting takes effect with the next update call, excepting already mounted
+file systems.
 .It detect_probe=1
 If set to 0 or any other value not 1, discovering file systems through probing
 is deactivated.
@@ -127,6 +134,11 @@ The workaround takes immediate effect.
 This is obligatory to mount optical discs.
 .Pp
 This setting takes immediate effect.
+.It iso9660_devs="acd*,cd*"
+This is a comma separated list of glob patterns. Devices matching one of the
+patterns are assumed to be optical disk drives.
+.Pp
+Changes to this setting take effect with the next update call.
 .It iso9660_options=ro
 This is more appropriate for optical devices than the default mount options.
 .Pp

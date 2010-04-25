@@ -159,11 +159,11 @@ during boot. These will be ignored.
 The first activity during an update call is device discovery. The entire
 configuration is rebuilt every time an update is called. To this
 end detector functions are called. The current detector functions are
-named mountedDetect(), glabelDetect() and probeDetect(). Each of these
-functions call the writeNode() function to record their findings and
-set up the necessary directory and link structure. The writeNode()
-function also performs the blacklisting checks. The detectors keep a list
-of already probed devices, to avoid redundant work.
+named mountedDetect(), glabelDetect(), iso9660Detect()  and probeDetect().
+Each of these functions calls the writeNode() function to record its
+discoveries and set up the necessary directory and link structure. The
+writeNode() function also performs the blacklisting checks. The detectors keep
+a list of already probed devices, to avoid redundant work.
 .Pp
 The mounted detector discovers the currently mounted devices. This is
 necessary, because mounting a glabel consumer destroys the glabel providers
@@ -176,6 +176,12 @@ The glabel detector uses the
 label class to identify file system types through labels. This is the
 traditional way of discovery for
 .Nm .
+.Pp
+The iso9660 detector simply assumes that devices conforming to certain name
+patterns are optical disk drives. This behaviour prevents detection failure
+if a drive does not hold a disk. The device pattern can be changed in the
+.Xr automounter.conf 5
+file.
 .Pp
 The probe detector takes the remaining geom providers reported by the
 .Xr gstat 8
@@ -190,6 +196,10 @@ detectors. This is a very unlikely case, but not entirely impossible.
 The next step is to compare the list of previously discovered devices
 and destroy the %%MEDIA%% link structure for each one that was not
 discovered this time.
+.Ss Revisits
+Completing the removal of stale media, detectors which requested it during
+the first run are revisited. This allows them to follow label changes of a
+device after the old media links have been removed.
 .Ss Reconfiguring AMD
 Now that the device discovery is completed,
 .Xr amd 8
@@ -269,13 +279,13 @@ following line in
 To start it without rebooting run the following command:
 .Pp
 	%%PREFIX%%/etc/rc.d/automounter start
-.Sh USB DISCOVERY
+.Sh DEVICE DISCOVERY
 As of
 .Nm
 1.4.1 it is no longer necessary to add an entry to the
 .Xr devd.conf 5
-file to automatically update available devices when USB mass storage devices
-appear or disappear. However, it is still necessary to restart
+file to automatically update available devices when they appear or disappear.
+However, it is still necessary to restart
 .Xr devd 8
 after installation:
 .Pp
