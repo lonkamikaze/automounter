@@ -1,9 +1,8 @@
-This minor release adds more graceful handling of "disappearing" file systems
-(i.e. USB sticks that have been unplugged while mounted) and the mlist command
-that issues some machine readable path information about available file
-systems and mounted file systems.
+With this minor release automounter gains the ability to detect optical drives
+without present media. It also adds automatic discovery for most available
+disk provider. I.e. automatic discovery is no longer limited to USB devices.
 
-- automounter 1.4.1
+- automounter 1.4.2
 
  * Tested on FreeBSD 8.0-STABLE
  Please run 'man 8 automounter' and 'man 5 automounter.conf' for introductions.
