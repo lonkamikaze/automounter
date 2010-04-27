@@ -1,8 +1,8 @@
-automounter-1.4.2 (, 2010):
+automounter-1.4.2 (27 April, 2010):
   - Track label changes gracefully.
   - Detect optical disc drives, even when no disc is present.
   - Add the detect_iso9660 switch and iso9660_devs pattern list.
-  - Improve devd configuration file, i.e. improve auto update.
+  - Improve devd configuration file, i.e. improve auto update significantly.
   - Use stderr for error messages and warnings.
 
 automounter-1.4.1 (14 April, 2010):
