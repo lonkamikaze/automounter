@@ -1,3 +1,15 @@
+automounter-1.4.3 (, 2010):
+  - Remove all recursive update calls (rely on devd).
+  - Remove update_delay.
+  - Update devd configuration to follow label changes.
+  - Change geliUpdate to use the fs probing code to fetch keys, and
+    make the regular mounting synchronous to make updating less error prone.
+  - Use labels for mounting when possible to avoid devd noise.
+  - Allow empty c, w and l settings.
+  - Only fork a single encrypted provider destroying process (instead of one
+    for each udpate), because only the one succeeding terminates unless the
+    key reappears.
+
 automounter-1.4.2 (27 April, 2010):
   - Track label changes gracefully.
   - Detect optical disc drives, even when no disc is present.

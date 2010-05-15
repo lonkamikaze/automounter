@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4.2
+version=1.4.3
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
@@ -80,17 +80,17 @@ geli=0
 # The file is in the following format:
 # 	<providerName>;<mdDevice>;<keyLabel>
 #
-# It is expected to meet this extended regular expression: [^;]+;md[0-9]+;[^;]+
+# The fields are defined as follows:
 # 	providerName	is the filename of the image or device link.
 #	mdDevice	is the device node of the file backed memory disk as
-#			it was returned by mdconfig.
-#	keyLabel	is the absolute path to the key the image was activated
-#			with.
+#			it was returned by mdconfig or the device that was
+#			referenced by a %%DEVFS%% relative symlink.
+#	keyLabel	is the label of the key providing device.
 # 	
 geli_nodes="%%RUN%%/automounter.geli.nodes"
 
 # A temporary file to recognize which nodes were available during the last run.
-geli_oldnodes="%%RUN%%/automounter.geli.oldnodes"
+geli_oldnodes="%%TMP%%/automounter.geli.oldnodes"
 
 # A file to remember where we can find which keys.
 #
@@ -106,10 +106,6 @@ geli_keys="%%GELI_KEYS%%"
 
 # Timeout in seconds for aquiring the lock.
 timeout=10
-
-# The delay before the update command takes effect. This is necessary
-# to ensure that geom knows about new labels.
-update_delay=2
 
 # If set to 1 glabel file system detection is turned on.
 detect_glabel=1
@@ -187,13 +183,11 @@ rmLinks() {
 		echo "del label: <$label> from <$device>"
 		/bin/rm "$linkdir/$label"
 		/bin/rm "$linkdir/${devfs##*/}/$device.$type"
+		/bin/rm "$linkdir/${devfs##*/}/$device"
 		/bin/rmdir "$linkdir/${devfs##*/}" 2> "$devfs/null"
 		/bin/rmdir "$linkdir/$type" 2> "$devfs/null"
 		/bin/rmdir "$mountdir/$label"
 		/bin/rmdir "$mountdir/$type" 2> "$devfs/null"
-
-		# Forget keys belonging to this label.
-		keys="$(echo "$keys" | /usr/bin/grep -Fv ";$label;")"
 	done
 }
 
@@ -243,6 +237,7 @@ createLinks() {
 		/bin/mkdir -p "$linkdir/${devfs##*/}"
 		/bin/ln -s "$directory/$hash" "$linkdir/$label"
 		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device.$type"
+		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device"
 	done
 }
 
@@ -258,15 +253,15 @@ createLinks() {
 #	The device the geli provider is available as.
 #
 geliUnmount() {
-	local label name device
+	local line label name device
 	label="$1"
 	name="$2"
 	device="$3"
+	line="$name;$device;$label"
 
 	# Attempt to detach until successful or until the
 	# key has returned.
 	while true; do
-		/bin/sleep 1
 		# Skip if the key to this image has returned.
 		/usr/bin/lockf "$lock" /bin/sh -c "
 			if /usr/bin/grep -qFx '$label;$name' \
@@ -303,15 +298,14 @@ geliUnmount() {
 				break
 			;;
 		esac
+		/bin/sleep 1
 	done
-	# Update labels in a locked fashion.
-	$0 update delay &
 
 	# Hang around to remove the device node for the image.
 	# Unless it's a device link.
 	if [ -e "$geli_images/$name" ]; then
 		until /sbin/mdconfig -du "$device"; do
-			/bin/sleep "$w"
+			/bin/sleep "${w:-1}"
 		done
 	fi
 }
@@ -461,17 +455,28 @@ unmount:=\"$0 umount umount $hash\"
 # @param 1
 #	The file system type to use for mounting.
 # @param 2
-#	The device to mount.
+#	The device to mount. This may also be a label.
 # @return
 #	Whatever the mount command returns, 0 for success,
 #	something else otherwise.
 #
 probeMount() {
-	local type mount options device
+	local type mount options device line status
 	type="$1"
 	device="$2"
 
+	# Create probing directory.
+	/bin/mkdir -p "$probe"
+
+	# Deal with devices given as a label.
+	line="$(/usr/bin/grep -x ".*;$device" "$nodes")"
+	if [ -n "$line" ]; then
+		device="${line%%;*}"
+	fi
+
 	# Check for config file settings.
+	mount="$type"
+	options="$mount_options"
 	if [ -n "$(eval "echo \"\$$type\"")" ]; then
 		mount="$(eval "echo \"\$$type\"")"
 	fi
@@ -481,6 +486,11 @@ probeMount() {
 
 	# Run the mount command.
 	/sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> "$devfs/null"
+	status=$?
+	if [ $status -ne 0 ]; then
+		/bin/rmdir "$probe"
+	fi
+	return $status
 }
 
 #
@@ -488,6 +498,7 @@ probeMount() {
 #
 probeUnmount() {
 	/sbin/umount -f "$probe" 2> "$devfs/null"
+	/bin/rmdir "$probe"
 }
 
 #
@@ -702,8 +713,6 @@ probeDetect() {
 	# Reformat probe_types.
 	probe_types="$(echo "$probe_types" | /usr/bin/egrep -o '[^,]+')"
 
-	/bin/mkdir -p "$probe"
-
 	# Create a list of devices.
 	devices="$(
 		/usr/sbin/gstat -b -I0 | \
@@ -766,8 +775,6 @@ probeDetect() {
 			echo "$label" >> "$probed"
 		done
 	done
-
-	/bin/rmdir "$probe"
 }
 
 #
@@ -776,8 +783,6 @@ probeDetect() {
 # Updates the amd.map, the list of partitions and the mount links, if amd
 # is running.
 #
-# @param 1
-#	If set delay the update.
 # @return
 #	ERR_NOT_STARTED, if automounter has not been started, otherwise 0.
 #
@@ -790,9 +795,6 @@ update() {
 	# This prevents automounter from starting too early from devd.
 	/bin/sync
 	test -e "$pidfile" || return $ERR_NOT_STARTED
-
-	# Give geom some time to identify the label.
-	test -n "$1" && /bin/sleep "$update_delay"
 
 	# Start building a new map by copying the static one.
 	/bin/cp "$static_map" "$map"
@@ -838,14 +840,14 @@ update() {
 		${detector}Detect revisit
 	done
 
+	# Update geli managed mounts.
+	geliUpdate
+
 	# Finally reload amd map.
 	until [ -n "$(/bin/cat "$pidfile" 2> "$devfs/null")" ]; do
 		/bin/sleep 0.1
 	done
 	/bin/kill -HUP "$(/bin/cat "$pidfile" 2> "$devfs/null")"
-
-	# Update geli managed mounts.
-	geliUpdate
 
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
@@ -860,11 +862,12 @@ geliUpdate() {
 	# Do not run if geli features are not activated.
 	test "$geli" != "1" && return 0
 
-	local keys key label name line update_amd device
+	local oldkeys keys key label name line device
 
 	# Clean up keys from stale mounts.
 	/usr/bin/touch "$oldnodes"
 	keys="$(/bin/cat "$geli_availablekeys" 2> "$devfs/null")"
+	oldkeys="$keys"
 	for line in $(/bin/cat "$oldnodes"); do
 		# Skip still present lines.
 		/usr/bin/grep -qFx "$line" "$nodes" && continue
@@ -886,12 +889,16 @@ geliUpdate() {
 		label="${line#*;}"
 		device="${line%%;*}"
 
-		for key in $(
-			/bin/ls "$linkdir/${devfs##*/}/$device.${label%%/*}/$geli_keys/" 2> "$devfs/null"
-		); do
-			echo "add key: <$key> from <$label>"
-			echo "$label;$key" >> "$geli_availablekeys"
-		done
+		if probeMount "${label%%/*}" "$device"; then
+			for key in $(
+				/bin/ls "$probe/$geli_keys/" 2> "$devfs/null"
+			); do
+				echo "add key: <$key> from <$label>"
+				echo "$label;$key" >> "$geli_availablekeys"
+			done
+
+			probeUnmount
+		fi
 	done
 
 	# Look for stale images.
@@ -906,19 +913,21 @@ geliUpdate() {
 		# This line must remain until the node has been destroyed.
 		echo "$line" >> "$geli_nodes"
 
-		# Skip if the key to this this image is still around.
-		if /usr/bin/grep -qx "$label;$name" "$geli_availablekeys"; then
+		# Skip if the key to this image is still around.
+		if /usr/bin/grep -qFx "$label;$name" "$geli_availablekeys"; then
 	 		continue
 		fi
 
-		# This image is stale. Fork a process that tries to unmount it.
-		geliUnmount "$label" "$name" "$device" &
+		# This image is stale. Is that a new discovery?
+		if echo "$oldkeys" | /usr/bin/grep -qFx "$label;$name"; then
+ 			# Fork a process that tries to unmount it.
+			geliUnmount "$label" "$name" "$device" &
+		fi
 	done
 	/usr/bin/touch "$geli_nodes"
 	/bin/rm "$geli_oldnodes"
 
 	# Attach encrypted devices. If necessary create them from images.
-	update_amd=
 	for key in $(/bin/cat "$geli_availablekeys"); do
 		label="${key%;*}"
 		name="${key##*;}"
@@ -932,7 +941,9 @@ geliUpdate() {
 
 		# Being here means that this image has not yet been made
 		# available. So it is time to give it a try.
-		key="$linkdir/$label/$geli_keys/$name"
+		key="$probe/$geli_keys/$name"
+
+		probeMount "${label%%/*}" "$label"
 
 		# Get the device to attach.
 		if [ -L "$geli_images/$name" -a ! -e "$geli_images/$name" ]
@@ -955,17 +966,13 @@ geliUpdate() {
 			echo "add encrypted provider: <$name> as <$device>" \
 				"with key from <$label>"
 			echo "$name;$device;$label" >> "$geli_nodes"
-			update_amd=1
 		else
 			# Unsuccessful, clean up memory disk.
 			/sbin/mdconfig -du "$device"
 		fi
-	done
 
-	# Restart amd if a change has been made.
-	if [ -n "$update_amd" ]; then
-		update delay
-	fi
+		probeUnmount
+	done
 
 	return 0
 }
@@ -981,8 +988,8 @@ start() {
 
 	if [ ! -e "$pidfile" ]; then
 		/bin/cp "$static_map" "$map"
-		"%%AMD%%" -r -p -a "$a" -c "$c" -w "$w" -l "$l" \
-			"$directory" "$map" > "$pidfile" &
+		"%%AMD%%" -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
+			${l:+-l "$l"} "$directory" "$map" > "$pidfile" &
 	fi
 
 	if [ -n "$1" ]; then
@@ -1146,7 +1153,7 @@ mlist() {
 
 	# Print the devices that are available for mounting.
 	if [ -z "$1" -o "$1" = "dlinks" ]; then
-		/usr/bin/sed -E "s,([^;]*);([^/]*).*,$linkdir/${devfs##*/}/\1.\2," "$nodes" 2> "$devfs/null"
+		/usr/bin/sed -E "s,([^;]*);([^/]*).*,$linkdir/${devfs##*/}/\1\\$IFS$linkdir/${devfs##*/}/\1.\2," "$nodes" 2> "$devfs/null"
 	fi
 
 	return 0
@@ -1183,6 +1190,16 @@ mount() {
 			fi
 			if [ -n "$(eval "echo \"\$${type}_options\"")" ]; then
 				options="$(eval "echo \"\$${type}_options\"")"
+			fi
+
+			# When a label consumer is mounted, the label provider
+			# is destroyed, which creates unnecessary devd noise,
+			# i.e. the label disappears and re-appears when
+			# mounting and unmounting, causing lots of obsolete
+			# update calls through devd.
+			# Using the label for mounting avoids this.
+			if [ -e "$devfs/$label" ]; then
+				device="$label"
 			fi
 
 			# Give over to the mount command.
@@ -1250,7 +1267,7 @@ umount() {
 	if [ ! -e "$devfs/$device" ]; then
 		echo "automounter: Force unmounting missing <$label> from <$device>" 1>&2
 		# Schedule an update.
-		$0 update 1 &
+		$0 update &
 		exec /sbin/umount -f "$mountdir/$label" 2> "$devfs/null"
 	fi
 
@@ -1262,17 +1279,13 @@ umount() {
 case "$1" in
 	locked)
 		case "$2" in
-			start | update | stop)
-				$2 "$3"
-				return
-			;;
-			umount)
+			start | update | stop | mount | umount)
 				$2 "$3"
 				return
 			;;
 		esac
 	;;
-	list | mlist | mount)
+	list | mlist)
 		$1 "$2"
 		return
 	;;
@@ -1280,13 +1293,14 @@ case "$1" in
 		# Unmounts should not happen during updates.
 		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
 	;;
+	mount)
+		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
+		return
+	;;
 	start | update | stop)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
 		status=$?
 		case $status in
-			0 | $ERR_NOT_STARTED | $ERR_MOUNT_FS_MISSING | $ERR_UMOUNT_ACTIVE)
-				# Silent success/fail
-			;;
 			$EX_USAGE | $EX_SOFTWARE | $EX_OSERR | $EX_CANTCREAT | $EX_TEMPFAIL)
 				echo "automounter: Lock could not be aquired:" "$@" 1>&2
 			;;
