@@ -21,7 +21,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Apr 27, 2010
+.Dd May 15, 2010
 .Dt AUTOMOUNTER.CONF 5
 .Os
 .Sh NAME
@@ -120,7 +120,7 @@ five seconds by default.
 .Pp
 The workaround uses
 .Xr fstat 1
-to check weather files are opened on fuse based file systems and prevents
+to check whether files are opened on fuse based file systems and prevents
 the unmount command from being run if this is the case. The downside is that
 fstat is not able to see on which fuse file system the file is opened.
 So all fuse file systems remain mounted until there are no more opened files
@@ -200,12 +200,6 @@ the lock the instance of
 is skipped.
 .Pp
 Changing the timeout takes immediate effect.
-.It update_delay=1
-The time that automounter waits for camcontrol and atacontrol to catch up
-with recent changes, when the script has been called with the update parameter.
-.Pp
-This setting takes immediate effect.
-.El
 .Sh FILE SYSTEM SPECIFIC SETTINGS
 It is possible to influence the
 .Fl t
@@ -255,7 +249,7 @@ to 1.
 .It geli_nodes="%%RUN%%/automounter.geli.nodes"
 A file that is used to remember the device as which images were attached and
 the key that was used for attaching.
-.It geli_oldnodes="%%RUN%%/automounter.geli.oldnodes"
+.It geli_oldnodes="%%TMP%%/automounter.geli.oldnodes"
 A temporary file that is used when removing stale attachments or adding new
 ones.
 .It geli_availablekeys="%%RUN%%/automounter.geli.keys"

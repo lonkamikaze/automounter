@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Apr 27, 2010
+.Dd May 15, 2010
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -144,13 +144,13 @@ most difficult task of all.
 .Nm
 knows two states of operation, stopped and started. This is necessary to
 ensure that the system has been initialized before starting. The start
-call will be performed by the
+call is performed by the
 .Xr rc 8
-system, which will cause
+system, which causes
 .Nm
 to start
-.Xr amd 8
-and perform the first update, which will discover available file systems.
+.Xr amd 8 ,
+perform the first update and discover available file systems.
 .Pp
 If properly configured premature update calls might be issued by
 .Xr devd 8
@@ -200,11 +200,6 @@ discovered this time.
 Completing the removal of stale media, detectors which requested it during
 the first run are revisited. This allows them to follow label changes of a
 device after the old media links have been removed.
-.Ss Reconfiguring AMD
-Now that the device discovery is completed,
-.Xr amd 8
-is sent SIGHUP to reload the newly built map file. From this moment on the
-discovered devices are available.
 .Ss Encrypted Providers
 Afterwards, if activated, the
 .Xr geli 8
@@ -225,19 +220,23 @@ until the key becomes available again. After successful destruction of the
 provider the process starts a new update to ensure that keys provided by the
 destroyed provider are no longer listed as available.
 .Pp
-The step before last is to decrypt the providers for which new keys are
-available.
-.Pp
-Finally a new update is started, if the previous step succeeded in creating
-decrypted providers.
+The last step is to decrypt the providers for which new keys are available.
+This results in the creation of new geoms, which are picked up by
+.Xr devd 8 ,
+resulting in a new update call.
+.Ss Reconfiguring AMD
+Now that the device discovery is completed,
+.Xr amd 8
+is sent SIGHUP to reload the newly built map file. From this moment on the
+discovered devices are available.
 .Ss Locking
 Because the sequential order of events is critical to retain consistency
 most of the operation of automounter is locked. I.e. start,
-update, stop and umount are synchronous operations.
+update, stop, mount and umount are synchronous operations.
 .Pp
-Umounts, because they may not occur during device discovery, the others
-because update runs may only occur one at a time. The locking ensures
-that too many updates at once (e.g. lots of diconnect/connect events
+Mounts and umounts, because they may not occur during device discovery,
+the others, because update runs may only occur one at a time. The locking
+ensures that too many updates at once (e.g. lots of diconnect/connect events
 reported by
 .Xr devd 8
 or the removal of several encrypted providers) will be called sequentially
@@ -260,12 +259,12 @@ its managed file systems.
 .Pp
 The second advatage is that
 .Nm
-can thus intercept unmounts. This is used to enforce locked umounts as well
-as preventing unmount attempts to file systems in use, especially with the
-fuse hack in place. But it is also used to force unmount file systems whose
-devices are no longer present and issue an update call, because the
-disappearing of the device was previously missed, due to mounted file
-systems being protected from disappearing.
+can thus intercept mounts and umounts. This is used to enforce locked mounts
+and umounts umounts as well as preventing unmount attempts to file systems in
+use, especially with the fuse hack in place. But it is also used to force
+unmount file systems whose devices are no longer present and issue an update
+call, because the disappearing of the device was previously missed, due to
+mounted file systems being protected from disappearing.
 .Sh STARTUP
 In order for the dynamic creation and destruction of mountpoints to work,
 it is necessary that
