@@ -2,3 +2,4 @@
 * Set UPGRADE_TOOL to pkg_upgrade
 * Find a way to operate without mirrors.
 * use printf "\033]2;%s\007" "TITLE" and find a way to undo this
+* Write script that builds an INDEX from a package repository

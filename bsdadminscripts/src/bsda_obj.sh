@@ -99,7 +99,7 @@ bsda_obj=1
 #
 # In order to create classes this framework has to be loaded:
 #
-#	. bsda_obj.sh
+#	. ./bsda_obj.sh
 #
 # 1.1) Basic Class Creation
 #
