@@ -347,6 +347,8 @@ bsda:obj:createClass bsda:download:Server \
 		"Downloads a file from a server." \
 	x:protected:getSize \
 		"Gets the size of the source file." \
+	x:public:getStatus \
+		"Returns the number of active downloads." \
 
 #
 # Sets up a server object.
@@ -446,7 +448,7 @@ bsda:download:Server.download() {
 
 	# Update the amount of available download slots.
 	$this.getFree free
-	$this.setFree $(($free - 1))
+	$this.setFree $((free - 1))
 
 	# Propagate changes to the controlling process.
 	$job.getManager manager
@@ -475,11 +477,22 @@ bsda:download:Server.getSize() {
 	# Get the download location.
 	$this.getLocation location
 
-	# Get the file from this server.
+	# Get the file size from this server.
 	size="$(fetch -s "$location/$source" 2> /dev/null)"
 
 	# Return the size.
 	$caller.setvar "$1" "$size"
+}
+
+#
+# Returns the number of active downloads.
+#
+# @param 1
+#	The name of the variable to store the number of currently active
+#	downloads in.
+#
+bsda:download:Server.getStatus() {
+	$caller.setvar "$1" $(($($this.getDownloads downloads | wc -w)))
 }
 
 #
@@ -508,7 +521,7 @@ bsda:download:Server.run() {
 
 	# Update the amount of free download slots.
 	$this.getFree free
-	free=$(($free + $count))
+	free=$((free + count))
 	$this.setFree $free
 
 
@@ -587,6 +600,8 @@ bsda:obj:createClass bsda:download:Servers \
 		"The constructor." \
 	c:private:clean \
 		"The destructor." \
+	x:public:getStatus \
+		"Returns the number of active downloads." \
 
 
 #
@@ -687,6 +702,43 @@ bsda:download:Servers.popMirror() {
 	return 1
 }
 
+#
+# Returns the sum of active downloads over all servers.
+#
+# @param 1
+#	The name of the variable to store the number of currently active
+#	downloads in.
+# @param 2
+#	The number of servers the downloads are distributed over.
+# @param 3
+#	The number of all servers.
+#
+bsda:download:Servers.getStatus() {
+	local IFS sum servers active mirrors mirror
+
+	IFS='
+'
+
+	# Get the active master downloads.
+	$this.getMaster mirror
+	$mirror.getStatus sum
+	servers=1
+	active=0
+	test $sum -gt 0 && active=1
+
+	# Get the active mirror downloads.
+	$this.getMirrors mirrors
+	for mirror in $mirrors; do
+		servers=$((servers + 1))
+		$mirror.getStatus mirror
+		sum=$((sum + mirror))
+		test $mirror -gt 0 && active=$((active + 1))
+	done
+
+	$caller.setvar "$1" $sum
+	$caller.setvar "$2" $active
+	$caller.setvar "$3" $servers
+}
 
 #
 # Represents a download job.
@@ -702,11 +754,14 @@ bsda:obj:createClass bsda:download:Job \
 	x:protected:getSource \
 		"Adjust access to the getter method." \
 	w:private:target \
-		"The local target location." \
 	x:public:getTarget \
-		"Adjust access to the getter method." \
+		"The local target location." \
 	w:protected:size \
 		"The download size." \
+	w:private:startDownloadTime \
+		"The time a download attempt started." \
+	w:private:endDownloadTime \
+		"The time a download attempt completed." \
 	w:private:servers \
 		"A Servers instance that is used as a queue for untried" \
 		"download mirrors." \
@@ -725,6 +780,8 @@ bsda:obj:createClass bsda:download:Job \
 		"Returns whether the download was completed." \
 	x:public:hasSucceeded \
 		"Returns whether the download has succeeded." \
+	x:public:getStatus \
+		"Returns the current job status." \
 
 #
 # The constructor initializes attributes.
@@ -852,6 +909,7 @@ bsda:download:Job.run() {
 		# Unregister from the scheduler.
 		test -n "$scheduler" && $scheduler.unregister
 		# Start a download.
+		$this.setStartDownloadTime $(date -u +%s)
 		$mirror.download
 		# Register the download to the scheduler.
 		test -n "$scheduler" && $scheduler.register $mirror
@@ -875,6 +933,9 @@ bsda:download:Job.stop() {
 #
 bsda:download:Job.downloadSucceeded() {
 	local servers manager
+
+	# Record the end of this download.
+	$this.setEndDownloadTime $(date -u +%s)
 
 	# Delete the list of servers.
 	$this.getServers servers
@@ -900,6 +961,9 @@ bsda:download:Job.downloadSucceeded() {
 #
 bsda:download:Job.downloadFailed() {
 	local servers mirror master scheduler manager
+
+	# Forget the last download attempt.
+	$this.setStartDownloadTime
 
 	# Get the mirror and the master server.
 	$caller.getObject mirror
@@ -927,7 +991,7 @@ bsda:download:Job.downloadFailed() {
 }
 
 #
-# Retursn whether the job has been completed.
+# Returns whether the job has been completed.
 #
 # @return
 #	0 if the job has been completed
@@ -951,4 +1015,83 @@ bsda:download:Job.hasSucceeded() {
 	return $success
 }
 
+#
+# Returns a bunch of status information.
+#
+# @param 1
+#	The variable to store the local target file name in.
+# @param 2
+#	The variable to for the current file size (bytes) of the download.
+# @param 3
+#	The variable for the full file size in bytes.
+# @param 4
+#	The variable for the number of seconds passed downloading.
+# @param 5
+#	The variable for the expected number of seconds left downloading.
+# @param 6
+#	The variable for the progress in %.
+# @param 7
+#	The variable for the average download speed in bytes/second.
+# @return
+#	0 (true) if the download has completed, 1 otherwise.
+#
+bsda:download:Job.getStatus() {
+	local size start end passed target realsize progress speed predict
+	$this.getSize size
+	$this.getStartDownloadTime start
+	$this.getEndDownloadTime end
+	$this.getTarget target
+
+	#
+	# Two cases the download is in progress/completed or has not yet
+	# started.
+	#
+	if [ -n "$start" ]; then
+		# A download is in progress or has started.
+
+		# Get the current file size, assume at least 1 byte.
+		realsize=$(wc -c "$target" 2> /dev/null)
+		realsize=${realsize% *}
+		test $((realsize)) -eq 0 && realsize=1
+
+		# The download has not yet completed, so we use NOW to
+		# calculate progress and speed.
+		if [ -z "$end" ]; then
+			end=$(date -u +%s)
+		fi
+
+		# The time passed in seconds, at least 1.
+		passed=$((end - start))
+		test $((passed)) -eq 0 && passed=1
+
+		# The progress in %.
+		progress=$((realsize * 100 / size))
+
+		# The average speed in bytes/second.
+		speed=$((realsize / passed))
+
+		# Seconds left, add a 10% 'bonus' to the prediction for safety.
+		predict=$(((passed * size / realsize - passed) * 10 / 11))
+	else
+		# No progress.
+		passed=0
+		progress=0
+		speed=0
+		predict=0
+	fi
+
+	# Return all the results
+	$caller.setvar "$1" "$target"
+	$caller.setvar "$2" $realsize
+	$caller.setvar "$3" $size
+	$caller.setvar "$4" $passed
+	$caller.setvar "$5" $predict
+	$caller.setvar "$6" $progress
+	$caller.setvar "$7" $speed
+
+	# Return whether the download has been completed (not an indicator of
+	# success).
+	$this.hasCompleted
+	return
+}
 

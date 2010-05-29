@@ -27,12 +27,12 @@ bsdadminscripts-6.2 (never released):
    - Output function library (not multi-process-safe). Currently only used
      by pkg_upgrade.
 
-bsdadminscripts-6.1.1 (May 9, 2009):
+bsdadminscripts-6.1.1 (9 May, 2009):
  - uma version 1.1 to 1.1.1
    - A bug in the branch detection that caused it to always detect stable
      was fixed.
 
-bsdadminscripts-6.1 (May 7, 2009):
+bsdadminscripts-6.1 (7 May, 2009):
  - installer
    - Add DATADIR support.
  - uma version 1.0 to 1.1
@@ -46,7 +46,7 @@ bsdadminscripts-6.1 (May 7, 2009):
    - The upwards dependency checking speed has been improved significantly.
    - Many small performance improvements.
 
-bsdadminscripts-6.0 (April 26, 2009):
+bsdadminscripts-6.0 (26 April, 2009):
  - Fix and improve the verbose output of distviper.
  - Fix return code upon successful distviper completion.
  - Code cleanups in pkg_libchk, pkg_validate, portconfig and rcstart.
@@ -63,28 +63,28 @@ bsdadminscripts-6.0 (April 26, 2009):
  - Cleanups of all manual pages.
  - The install.sh script now installs compressed manual pages by default.
 
-bsdadminscripts-5.0 (January 27, 2009):
+bsdadminscripts-5.0 (27 January, 2009):
  - The distviper script that wipes outdated files from the distdir of the
    FreeBSD ports system has been added.
 
-bsdadminscripts-4.4.4 (January 12, 2009):
+bsdadminscripts-4.4.4 (12 January, 2009):
   - The pkg_libchk script manual page now contains a note on avoiding obsolete
     output.
 
-bsdadminscripts-4.4.3 (September 11, 2008):
+bsdadminscripts-4.4.3 (11 September, 2008):
   - The pkg_libchk script now works around several ldd bugs listed in the
     FreeBSD PR database as amd64/127275 and amd64/127276.
 
-bsdadminscripts-4.4.2 (April 13, 2008):
+bsdadminscripts-4.4.2 (13 April, 2008):
   - Fixes a bug in the install script that causes buildflags.awk to fail.
   - The output of pkg_validate has been cleaned up.
 
-bsdadminscripts-4.4.1 (April 6, 2008):
+bsdadminscripts-4.4.1 (6 April, 2008):
   - New install.sh and deinstall.sh script.
   - Most hard-coded locations have been removed from all scripts.
     They can be set by the install script. See INSTALL for details.
 
-bsdadminscripts-4.4 (March 22, 2008):
+bsdadminscripts-4.4 (22 March, 2008):
   - Fix provide keywords with trailing spaces and get rid of '-e' not found
     messages in the rcstart script.
   - Use shell substring processing where appropriate in rcstart, portconfig,
@@ -98,7 +98,7 @@ bsdadminscripts-4.4 (March 22, 2008):
     terminal. Because of this -r does no longer suppress status messages and
     -c has been introduced to compensate for that.
 
-bsdadminscripts-4.3 (March 10, 2008):
+bsdadminscripts-4.3 (10 March, 2008):
   - Fix inifinite loop in pkg_libchk when giving unknown parameters in a chain.
   - Add support for native make(1) directives to buildflags.
   - The pkg_libchk script now runs two parallel jobs per CPU core.
@@ -113,7 +113,7 @@ bsdadminscripts-4.3 (March 10, 2008):
   - The portconfig script has been subject to a code audit.
   - The portconfig script can now do more than 9 retries.
 
-bsdadminscripts-4.2 (February 12, 2008):
+bsdadminscripts-4.2 (12 February, 2008):
   - The file THANKS has been created.
   - The pkg_libchk script introduces the parameters -c and -v for clean
     and verbose output.
@@ -124,16 +124,16 @@ bsdadminscripts-4.2 (February 12, 2008):
   - The portconfig scripts now hides an error message that was previously
     printed, even though the situation was correctly handled by the script.
 
-bsdadminscripts-4.1.1 (February 4, 2008):
+bsdadminscripts-4.1.1 (4 February, 2008):
   - Minor bug in the new port matching behaviour of portconfig corrected.
 
-bsdadminscripts-4.1 (February 2, 2008):
+bsdadminscripts-4.1 (2 February, 2008):
   - Some checks in buildflags.mk have been corrercted.
   - The portconfig script no longer uses portupgrade. It still tries to copy
     the port matching behaviour of portupgrade, so there should be no
     recognizable change apart from increased performance.
 
-bsdadminscripts-4.0 (October 26, 2007):
+bsdadminscripts-4.0 (26 October, 2007):
   - The pkg_libchk script has been introduced.
   - The pkg_validate status message does not flicker any more.
   - The pkg_validate script now terminates after receiving ^C. 
@@ -141,23 +141,23 @@ bsdadminscripts-4.0 (October 26, 2007):
     ccache and distcc in a way that allows ccache to recognize compiler
     changes and not to mistake distcc changes for them.
 
-bsdadminscripts-3.0 (June 17, 2007):
+bsdadminscripts-3.0 (17 June, 2007):
   - All manual pages have received small improvements.
   - The pkg_validate script has been added to the collection.
   - The buildflags.conf example has been updated.
 
-bsdadminscripts-2.1.4 (June 9, 2007):
+bsdadminscripts-2.1.4 (9 June, 2007):
   - The rcstart script now executes rc_conf_files set in /etc/defaults/rc.conf.
   - The portconfig script now omits the package database consistency checking
     of portupgrade.
   - The buildflags.mk magic now deals with ports that remember the number of
     threads from the configure stage, which can lead to a failed install.
 
-bsdadminscripts-2.1.3 (May 2, 2007):
+bsdadminscripts-2.1.3 (2 May, 2007):
   - The buildflags.mk magic now works even if a buildflags.conf is not
     present.
 
-bsdadminscripts-2.1.2 (September 13, 2006):
+bsdadminscripts-2.1.2 (13 September, 2006):
   - Portconfig now attempts to to act even if portupgrade returned an error.
   - SUBTHREADS now only works if install is not specified, due to many
     FreeBSD ports compiling, but not installing properly. This will not
@@ -166,10 +166,10 @@ bsdadminscripts-2.1.2 (September 13, 2006):
   - Some corrections to the buildflags.conf(1) man page.
   - Some corrections to the buildflags.awk(1) man page.
 
-bsdadminscripts-2.1.1 (August 3, 2006):
+bsdadminscripts-2.1.1 (3 August, 2006):
   - Some small fixes to the buildflags framework.
 
-bsdadminscripts-2.1 (July 19, 2006):
+bsdadminscripts-2.1 (19 July, 2006):
   - The script buildflags.sh has been replaced with buildflags.awk.
     The new script is backwards compatible, but a lot faster, with
     cleaner code and has been rid of some limitations of the old script.
@@ -179,7 +179,7 @@ bsdadminscripts-2.1 (July 19, 2006):
   - The sample buildflags.conf has been replaced with a configuration that
     is really in use.
 
-bsdadminscripts-2.0 (July 14, 2006):
+bsdadminscripts-2.0 (14 July, 2006):
   - The buildflags framework to control location dependant build flags
     has been introduced.
   - The --help flag of rcstart and portconfig has been castrated in favour
@@ -187,17 +187,17 @@ bsdadminscripts-2.0 (July 14, 2006):
   - The rcstart script now surpresses error messages caused by empty rc.d
     folders.
 
-bsdadminscripts-1.1 (May 30, 2006):
+bsdadminscripts-1.1 (30 May, 2006):
   - The portconfig script has been rid of all 'grep -o' calls for FreeBSD 4.x
     compatibility.
   - The rcstart script has been rid of all 'grep -o' calls for FreeBSD 4.x
     compatibility.
 
-bsdadminscripts-1.0 (May 14, 2006):
+bsdadminscripts-1.0 (14 May, 2006):
   - The rcstart script now treats service names as regular expressions and
     applies the command on all matching services.
   - The code in portconfig that parses the output of portupgrade has been
     rewritten to make it easier maintainable.
 
-bsdadminscripts-0.9 (April 12, 2006):
+bsdadminscripts-0.9 (12 April, 2006):
   - Initial release, containing portconfig and rcstart.
