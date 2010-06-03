@@ -1033,14 +1033,19 @@ bsda:download:Job.hasSucceeded() {
 # @param 7
 #	The variable for the average download speed in bytes/second.
 # @return
-#	0 (true) if the download has completed, 1 otherwise.
+#	0 (true) if the download is in progress, 1 otherwise.
 #
 bsda:download:Job.getStatus() {
-	local size start end passed target realsize progress speed predict
+	local status size start end passed
+	local  target realsize progress speed predict
+
 	$this.getSize size
 	$this.getStartDownloadTime start
 	$this.getEndDownloadTime end
 	$this.getTarget target
+
+	test -n "$start" -a -z "$end"
+	return $?
 
 	#
 	# Two cases the download is in progress/completed or has not yet
@@ -1071,7 +1076,7 @@ bsda:download:Job.getStatus() {
 		speed=$((realsize / passed))
 
 		# Seconds left, add a 10% 'bonus' to the prediction for safety.
-		predict=$(((passed * size / realsize - passed) * 10 / 11))
+		predict=$(((passed * size / realsize - passed) * 11 / 10))
 	else
 		# No progress.
 		passed=0
@@ -1089,9 +1094,7 @@ bsda:download:Job.getStatus() {
 	$caller.setvar "$6" $progress
 	$caller.setvar "$7" $speed
 
-	# Return whether the download has been completed (not an indicator of
-	# success).
-	$this.hasCompleted
-	return
+	# Return whether the download is currently in progress.
+	return $status
 }
 
