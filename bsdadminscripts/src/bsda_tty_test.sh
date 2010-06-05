@@ -1,5 +1,6 @@
-#!/bin/sh
-. ./bsda_tty.sh
+#!/bin/sh -f
+bsda_dir="${0%${0##*/}}"
+. ${bsda_dir:-.}/bsda_tty.sh
 bsda:tty:Terminal term
 class=bsda:tty:Terminal
 $term.use 6
