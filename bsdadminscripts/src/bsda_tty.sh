@@ -33,11 +33,11 @@ bsda_tty=1
 # A package for controlling the terminal and mixing status output on
 # /dev/tty with regular output on /dev/stdout and /dev/stderr in such
 # a way that the using code does not have to know whether /dev/stdout
-# is a terminal or a file.
+# and /dev/stderr are the terminal or a file.
 #
 
 #
-# A list of useful termcap(5) capabilities, useful with tput(1):
+# A list of useful termcap(5) capabilities, used with tput(1):
 # 	save_cursor		sc
 #	restore_cursor		rc
 #	cursor_address		cm #1 #2
@@ -47,18 +47,24 @@ bsda_tty=1
 #	clr_eol			ce
 #	clr_eos			cd
 #	delete_line		dl
+#	parm_insert_line	AL #1
+#	insert_line		al
 #	cursor_invisible	vi
 #	cursor_normal		ve
 #	cursor_visible		vs
 #	parm_down_cursor	DO #1
 #	parm_up_cursor		UP #1
 #	carriage_return		cr
+#	newline			nw
+#	cursor_down		do
+#	cursor_up		up
 #
 
 # Terminal exceptions.
 readonly bsda_tty_ERR_TERMINAL_STATUSPROVIDER_INVALID=1
 readonly bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS=2
-readonly bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST=1
+readonly bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST=3
+readonly bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER=4
 
 #
 # An error storage variable.
@@ -89,8 +95,9 @@ bsda:obj:createClass bsda:tty:Library \
 # @param 3
 #	The value to convert.
 # @param 4
-#	The optional targeted maximum string length. A length below 3 may lead
-#	to 0 values, the default length is 4.
+#	The optional targeted maximum string length. A length below 3 leads
+#	to 0 values between 1000 and 1024 of the underlying unit,
+#	the default length is 4.
 #
 bsda:tty:Library.convertBytes() {
 	local width unit value scale decscale rest
@@ -184,10 +191,11 @@ bsda:tty:Library.format() {
 	IFS='
 '
 
+	# TODO add support for all printf padding options
 	outvar="$1"
 	pattern="$2"
 	shift 2
-	columns=$(tput co || echo 80)
+	columns=$(test -e /dev/tty && tput co 2> /dev/tty || echo 80)
 
 	#
 	# Normally the format pattern is parsed two times. The first time
@@ -299,8 +307,13 @@ bsda:tty:Library.format() {
 	$caller.setvar "$outvar" "$output"
 }
 
+#
+# Instances of classes implementing this interface can be attached to status
+# lines and will be queried for a new status line whenever the
+# Terminal.refresh() method is called.
+#
 bsda:obj:createInterface bsda:tty:StatusProvider \
-	x:requestStatus \
+	x:reportStatus \
 		"Expected to return a status line to the first parameter." \
 	x:disconnectStatus \
 		"Is called if the status provider gets disconnected." \
@@ -329,6 +342,10 @@ bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library\
 		"Notifies the StatusProvider instances." \
 	x:private:draw \
 		"Draws the buffer." \
+	x:private:getDisplayCount \
+		"Returns the number of status lines drawn." \
+	x:private:getDisplayBuffer \
+		"Returns the portion of the buffer that may be displayed." \
 	x:public:deactivate \
 		"Deactivates the Terminal controlling methods." \
 	x:public:use \
@@ -341,6 +358,10 @@ bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library\
 		"Refresh status lines." \
 	x:public:attach \
 		"Attach a StatusProvider to a status line." \
+	x:public:detach \
+		"Detach a StatusProvider from a status line." \
+	x:public:flush \
+		"Detach all StatusProviders." \
 	x:public:line \
 		"Sets a status line." \
 	x:public:stdout \
@@ -351,33 +372,34 @@ bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library\
 #
 # The constructor checks whether a terminal is available.
 #
+# In that case the object is configured to be active and have 0 status
+# lines. Also the cursor display is deactivated.
+#
 bsda:tty:Terminal.init() {
 	if [ -e /dev/tty ]; then
-		tput vi
+		tput vi > /dev/tty
 		$this.setActive 1
 		$this.setCount 0
 		$this.setVisible 1
 	fi
+
+	return 0
 }
 
+#
+# The destructor removes the status lines, makes the cursor visible again
+# and detaches all attached StatusProvider instances.
+#
 bsda:tty:Terminal.clean() {
-	local IFS providers provider active
+	local active
 
-	IFS='
-'
 	$this.getActive active
 	if [ -n "$active" ]; then
 		$this.hide
 		tput ve > /dev/tty
 	fi
 
-	$this.getProviders providers
-	for provider in $providers; do
-		if bsda:tty:StatusProvider.isInstance "$provider"; then
-			$provider.disconnectStatus
-		fi
-	done
-
+	$this.flush
 
 	return 0
 }
@@ -386,26 +408,79 @@ bsda:tty:Terminal.clean() {
 # Draw the buffer to stdout, make sure not to use more lines than the terminal
 # currently provides.
 #
-# Falls back to 24 lines if the terminal does not report them.
+# This method does not make sure that it is drawing to the terminal. Output
+# has to be directed by the caller.
 #
 bsda:tty:Terminal.draw() {
-	local buffer lines count
+	local IFS buffer count
 
-	$this.getCount count
-	lines=$(tput li || echo 24)
-	if [ $count -lt $lines ]; then
-		count="$lines"
-	fi
+	IFS='
+'
 
-	buffer="$($this.getBuffer | tail -n $count)."
-	tput cr cd
-	echo -n "${buffer%.}"
+	$this.getDisplayCount count
+	$this.getDisplayBuffer buffer
+	tput cr AL $count
+	echo -n "$buffer"
 	tput cr UP $((count - 1))
-
 }
 
 #
-# Deactivates terminal handling.
+# Returns the number of status lines that may be output.
+#
+# This is either the number of available lines or half the terminal height,
+# whichever one is shorter.
+#
+# @param &1
+#	The number of lines to display.
+#
+bsda:tty:Terminal.getDisplayCount() {
+	local count maxlines
+	maxlines=$(($(tput li 2> /dev/tty || echo 24) / 2))
+	$this.getCount count
+	if [ $count -gt $maxlines ]; then
+		count="$maxlines"
+	fi
+	$caller.setvar "$1" $count
+}
+
+#
+# Returns the portion of the buffer that can currently be displayed.
+#
+# I.e. it returns the top left part of the buffer cropped to the
+# appropriate width and height.
+#
+# @param &1
+#	The displayable buffer portion.
+#
+bsda:tty:Terminal.getDisplayBuffer() {
+	local IFS count maxco buffer
+
+	IFS='
+'
+
+	# Get the maximum columns from the terminal.
+	maxco=$(tput co 2> /dev/tty || echo 80)
+	tput xn || maxco=$((maxco - 1))
+
+	# Get the number of status lines to display and acquire them
+	# from the buffer. Reduce them to the permitted number of collumns.
+	$this.getDisplayCount count
+	buffer="$(
+		$this.getBuffer \
+			| head -n $count \
+			| sed -E "s/(.{$maxco}).*/\\1/"
+		printf .
+	)"
+
+	# Return the buffer.
+	$caller.setvar "$1" "${buffer%$IFS.}"
+}
+
+#
+# This turns all terminal operations on /dev/tty off.
+#
+# The stdout() and stderr() methods are reduced to producing raw output, all
+# other public methods simply terminate upon call.
 #
 bsda:tty:Terminal.deactivate() {
 	$this.reset
@@ -413,17 +488,21 @@ bsda:tty:Terminal.deactivate() {
 }
 
 #
+# Sets the number of status lines to manage for this terminal.
+#
 # @param 1
 #	The number of status lines to use.
 #
 bsda:tty:Terminal.use() {
-	local IFS active count buffer providers provider index
+	local IFS active count buffer providers provider index visible
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active" && return
 
 	IFS='
 '
+
+	#TODO Exceptions for invalid numbers.
 
 	#
 	# Two cases, the new number of lines is greater or smaller.
@@ -435,6 +514,7 @@ bsda:tty:Terminal.use() {
 		# Lower the count.
 		index=0
 		for provider in $providers; do
+			# Detach obsolete StatusProvider instances.
 			if [ $index -ge $1 ]; then
 				if bsda:tty:StatusProvider.isInstance "$provider"; then
 					$provider.disconnectStatus
@@ -443,50 +523,58 @@ bsda:tty:Terminal.use() {
 			index=$((index + 1))
 		done
 		if [ $1 -gt 0 ]; then
-			providers="$(echo "$providers." | head -n $1)"
-			providers="${providers%.}"
-			buffer="$(echo "$buffer." | tail -n $1)"
-			buffer="${buffer%.}"
+			providers="$(echo "$providers" | head -n $1 ; printf .)"
+			providers="${providers%$IFS.}"
+			buffer="$(echo "$buffer" | head -n $1 ; printf .)"
+			buffer="${buffer%$IFS.}"
 		else
 			providers=
 		fi
 	elif [ $count -lt $1 ]; then
 		# Increase the count.
-		for index in $(jot $(($1 - count))); do
+		for index in $(jot $(($1 - count)) $count); do
+			if [ $index -eq 0 ]; then
+				continue
+			fi
 			providers="$providers$IFS"
-			buffer="$IFS$buffer"
+			buffer="$buffer$IFS"
 		done
 	fi
 
-	$this.hide
+	# Record the new buffer and provider list, redraw if necessary.
+	$this.getVisible visible
+	test -n "$visible" && $this.hide
 	$this.setProviders "$providers"
 	$this.setBuffer "$buffer"
 	$this.setCount $1
-	$this.show
+	test -n "$visible" && $this.show
 }
 
+#
+# Turn off all /dev/tty operations, but still perform the buffer operations.
+#
 bsda:tty:Terminal.hide() {
-	local active visible
+	local active visible maxli
 
 	$this.getActive active
-	test -n "$active" && return
-
-	IFS='
-'
+	test -z "$active" && return
 
 	$this.getVisible visible
 
 	if [ -n "$visible" ]; then
-		tput cd
+		tput AL $(tput li 2> /dev/tty || echo 24)
 		$this.setVisible
 	fi > /dev/tty
 }
 
+#
+# Reactivate /dev/tty operations after a call to the hide() method.
+#
 bsda:tty:Terminal.show() {
 	local active visible
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active"  && return
 
 	$this.getVisible visible
 
@@ -497,21 +585,89 @@ bsda:tty:Terminal.show() {
 }
 
 #
-# 
+# Refresh the contents of all status lines that have a provider attached.
+#
+# Causes a redraw of the status lines if they are currently visible.
+#
 # @param @
 #	Each parameter represents a line index or a StatusProvider instance.
 # @throws bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
 #	Is thrown if an invalid provider was given.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+#	Is thrown if the given line index is not a number.
 # @throws bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
 #	Is thrown if an inexistant index line is given.
 #
 bsda:tty:Terminal.refresh() {
-	local active
+	local IFS active provider index line visible count sedcmd buffer
+	local providers
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active" && return
 
-	#TODO
+	IFS='
+'
+
+	$this.getCount count
+	sedcmd=
+	if [ $# -eq 0 ]; then
+		# Get the available providers and indexes.
+		for provider in $($this.getProviders | grep -nvx ''); do
+			index="${provider%%:*}"
+			provider="${provider#*:}"
+
+			$provider.reportStatus line
+			sedcmd="${sedcmd:+$sedcmd$IFS}${index}c\\$IFS$line"
+		done
+	else
+		# A list of indexes/providers was specified.
+		$this.getProviders providers
+		for provider in "$@"; do
+			if bsda:tty:StatusProvider.isInstance "$provider"; then
+				# A provider was given find the index number
+				# (counting from 1).
+				index="$(echo "$providers" | grep -nFx "$provider")"
+
+				if [ -z "$index" ]; then
+					bsda_tty_errno=$bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
+					return 1
+				fi
+
+				index=${index%%:*}
+			else
+				# Apparently an index number was given.
+				index="$provider"
+				if ! bsda:obj:isInt "$index"; then
+					bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+					return 1
+				fi
+				if [ $index -ge $count -o $index -lt 0 ]; then
+					bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
+					return 1
+				fi
+				# Sed counts from 1, so pad the index.
+				index="$((index + 1))"
+				provider="$(echo "$providers" | sed "$index!d")"
+			fi
+			if [ -z "$provider" ]; then
+				# If no provider is attached, nothing to be done.
+				continue
+			fi
+			# Get the new status line.
+			$provider.reportStatus line
+			sedcmd="${sedcmd:+$sedcmd$IFS}${index}c\\$IFS$line\\$IFS"
+		done
+	fi
+
+	# Update the buffer.
+	buffer="$($this.getBuffer | sed "$sedcmd" ; printf .)"
+	$this.setBuffer "${buffer%$IFS.}"
+
+	# Redraw status lines.
+	$this.getVisible visible
+	test -n "$visible" && $this.draw > /dev/tty
+
+	return 0
 }
 
 #
@@ -520,7 +676,7 @@ bsda:tty:Terminal.refresh() {
 # Either attaches the provider to a specific line or if no line is provided
 # creates a new one.
 #
-# Lines are counted from bottom to top, starting at 0.
+# Lines are counted from top to bottom, starting at 0.
 #
 # @param 1
 #	The StatusProvider instance to attach.
@@ -528,15 +684,20 @@ bsda:tty:Terminal.refresh() {
 #	The index of the line to attach the provider to, optional.
 # @throws bsda_tty_ERR_TERMINAL_STATUSPROVIDER_INVALID
 #	Is thrown if an invalid provider was given.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+#	Is thrown if the given line index is not a number.
 # @throws bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
 #	Is thrown if the given line index is outside of the scope of currently
 #	managed lines.
 #
 bsda:tty:Terminal.attach() {
-	local active index count buffer providers provider line
+	local IFS active index count buffer providers provider line visible
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active" && return
+
+	IFS='
+'
 
 	# Check whether a valid StatusProvider has been given.
 	provider="$1"
@@ -549,60 +710,370 @@ bsda:tty:Terminal.attach() {
 	$this.getCount count
 
 	# Set a proper index.
-	if bsda:obj:isUInt "$index"; then
+	if bsda:obj:isInt "$index"; then
 		if [ $index -ge $count -o $index -lt 0 ]; then
-			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX
+			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
 			return 1
 		fi
 		$this.detach $index
+	elif [ -n "$index" ]; then
+		bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+		return 1
 	else
 		index=$count
 		$this.use $((count + 1))
 	fi
 
 	# Update the buffer.
-	$provider.requestStatus line
-	buffer="$($this.getBuffer | sed "$((count - $index))c\\$IFS$line$IFS")."
-	$this.setBuffer "${buffer%.}"
-	# Draw the updated buffer.
-	$this.draw
+	$provider.reportStatus line
+	buffer="$($this.getBuffer | sed "$(($index + 1))c\\$IFS$line\\$IFS" ; printf .)"
+	$this.setBuffer "${buffer%$IFS.}"
+
+	# Draw the updated buffer, if necessary.
+	$this.getVisible visible
+	test -n "$visible" && $this.draw > /dev/tty
 	
 	# Attach the provider.
-	providers="$($this.getProviders | sed "$((index + 1))c\\$IFS$provider$IFS")."
-	$this.setProviders "${providers%.}"
+	providers="$($this.getProviders | sed "$((index + 1))c\\$IFS$provider\\$IFS" ; printf .)"
+	$this.setProviders "${providers%$IFS.}"
+
+	return 0
 }
 
+#
+# Detach all attached StatusProvider instances and reset the status line buffer.
+#
+bsda:tty:Terminal.flush() {
+	local IFS active providers provider index count
+
+	$this.getActive active
+	test -z "$active" && return 0
+
+	IFS='
+'
+
+	# Give all attached providers the disconnect notice.
+	for provider in $providers; do
+		if bsda:tty:StatusProvider.isInstance "$provider"; then
+			$provider.disconnectStatus
+		fi
+	done
+
+	# Create empty buffers.
+	$this.getCount count
+	providers=
+	if [ $count -gt 0 ]; then
+		for index in $(jot $count); do
+			providers="$providers$IFS"
+		done
+	fi
+	$this.setBuffer "$providers"
+	$this.setProviders "$providers"
+}
+
+
+#
+# Detaches the given provider. The screen is not redrawn.
+#
+# @param 1
+#	A line index or a StatusProvider instance.
+# @throws bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
+#	Is thrown if an invalid provider was given.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+#	Is thrown if the given line index is not a number.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
+#	Is thrown if an inexistant index line is given.
+#
 bsda:tty:Terminal.detach() {
-	local active
+	local IFS active providers provider index sedcmd buffer count
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active" && return
 
-	#TODO
+	IFS='
+'
+
+	$this.getProviders providers
+	provider="$1"
+
+	# Either a provider or an index.
+	if bsda:tty:StatusProvider.isInstance "$provider"; then
+		# The given parameter is a provider.
+
+		# Check whether the provider is attached.
+		if ! echo "$providers" | grep -qFx "$provider"; then
+			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
+			return 1
+		fi
+
+		# Notify the provider about the disconnect.
+		$provider.disconnectStatus
+
+		# Create a sed command that replaces the matching lines.
+		# The grep command provides line numbers and the sed command
+		# produces a line replacing sed command.
+		sedcmd="$(
+			echo "$providers" | grep -Fxn "$provider" \
+				| sed "s/:.*/g/"
+		)"
+
+		# Empty the affected lines in the providers list.
+		providers="$(echo "$providers" | sed "$sedcmd" ; printf .)"
+		$this.setProviders "${providers%$IFS.}"
+
+		# Empty the affected lines in the buffer.
+		buffer="$($this.getBuffer | sed "$sedcmd" ; printf .)"
+		$this.setBuffer="${buffer%$IFS.}"
+	else
+		# The given parameter is an index.
+		index="$provider"
+
+		# Check whether the index is a valid integer.
+		if ! bsda:obj:isInt "$index"; then
+			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+			return 1
+		fi
+
+		# Check whether the index is within the managed range.
+		$this.getCount count
+		if [ $index -ge $count -o $index -lt 0 ]; then
+			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
+			return 1
+		fi
+
+		# Get the provider at the index position.
+		$this.getProviders providers
+		provider="$(echo "$providers" | sed "$(index + 1)!d")"
+
+		# If there was a provider at the index position, notify it
+		# about the disconnect.
+		if bsda:tty:StatusProvider.isInstance "$provider"; then
+			$provider.disconnectStatus
+		fi
+
+		# Empty the line in the buffer.
+		buffer="$($this.getBuffer | sed "$(index + 1))g" ; printf .)"
+		$this.setBuffer "${buffer%$IFS.}"
+		# Empty the line in the providers list.
+		providers="$(echo "$providers" | sed "$((index + 1))g" ; printf .)"
+		$this.setProviders "${providers%$IFS.}"
+	fi
 }
 
+#
+# Sets a status line by a given index.
+#
+# The lines are numbered from the top, starting at 0.
+#
+# The provided text is reduced to the contents of the first line.
+#
+# @param 1
+#	The index line to update.
+# @param 2
+#	The text to set the line to.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+#	Is thrown if the given line index is not a number.
+# @throws bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
+#	Is thrown if an inexistant index line is given.
+#
 bsda:tty:Terminal.line() {
-	local active
+	local IFS active visible count pos buffer line maxco
 
 	$this.getActive active
-	test -n "$active" && return
+	test -z "$active" && return
 
-	#TODO
+	# Check the given index.
+	$this.getCount count
+	pos="$1"
+	if ! bsda:obj:isInt "$pos"; then
+		bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER
+		return 1
+	fi
+	if [ $1 -ge $count -o $pos -lt 0 ]; then
+		bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS
+		return 1
+	fi
+
+	IFS='
+'
+
+
+	# Check if the line can be displayed.
+	$this.getVisible visible
+	$this.getDisplayCount count
+	if [ -n "$visible" -a $pos -lt $count ]; then
+		# Crop the line to display.
+		maxco=$(tput co 2> /dev/tty || echo 80)
+		tput xn || maxco=$((maxco - 1))
+		line="$(echo "$2" | sed -E -e '1!d' -e "1s/(.{$maxco}).*/\\1/")"
+
+		# Jump to the right line.
+		tput cr DO $pos ce
+		# Draw it.
+		echo -n "$line"
+		# Return the cursor to its origin.
+		tput cr UP $pos
+	fi > /dev/tty
+
+	# Store the new line in the status line buffer.
+	$this.getCount count
+	buffer="$($this.getBuffer | sed "$((pos + 1))c\\$IFS${2%%$IFS*}\\$IFS" ; printf .)"
+	$this.setBuffer "${buffer%$IFS.}"
+
+	return 0
 }
 
+#
+# Outputs text on stdout without destroying status line display.
+#
+# The text to output can be given as command arguments or through a pipe.
+# Arguments take precedence over piped input.
+#
+# Regardless, whether stdout is redirected or not, the output will also appear
+# on the terminal unless the output was too long to display on the terminal in
+# one chunk.
+#
+# Characters spacing more than one column (i.e. tabs) will break this.
+# Multibyte characters might break as well, this depends on sed(1).
+#
+# @param @
+#	The text to output.
+# @return
+#	False (1), if the output was not drawn on the terminal,
+#	true (0) otherwise.
+#
 bsda:tty:Terminal.stdout() {
-	local active
+	local IFS output draw active visible count maxli maxco lines redraw
+	local status glitch
 
+	IFS='
+'
+
+	# Check whether tty operations are activated.
+	visible=
 	$this.getActive active
+	test -n "$active" && $this.getVisible visible
 
-	#TODO
+	# Take output either from arguments, or if none are provided from
+	# stdin.
+	if [ $# -gt 0 ]; then
+		output="$@"
+	else
+		output="$(cat)"
+	fi
+
+	#
+	# Perform all the fancy terminal handling like output faking, status
+	# line drawing and cursor placing.
+	#
+
+	# If the entire output uses more lines than available from the
+	# terminal, the status lines need redrawing after performing regular
+	# output.
+	redraw=
+	# The return value.
+	status=0
+	# Only perform all that fancy stuff in visible mode.
+	if [ -n "$visible" ]; then
+		# Get the maximum lines and columns from the terminal.
+		maxli=$(tput li 2> /dev/tty || echo 24)
+		maxco=$(tput co 2> /dev/tty || echo 80)
+
+		# Set this to * if the terminal breaks with exactly maxco long
+		# lines, else set this to +.
+		glitch='*'
+		tput xn && glitch='+'
+
+		# Get the number of status lines to display and acquire them
+		# from the buffer.
+		$this.getDisplayCount count
+		$this.getDisplayBuffer buffer
+
+		# Count the lines the output will use on the terminal, to do
+		# this lines longer than maxco are split before counting, that is what the
+		# fancy sed(1) command does.
+		lines=$(
+			echo "$output" \
+				| sed -E "/.{$maxco}.$glitch/s/.{$maxco}/&\\$IFS/${IFS}P${IFS}D" \
+				| wc -l
+		)
+
+		# Three cases, we might have enough space to draw everything,
+		# just the output, or the output is too long.
+		if [ $lines -ge $maxli ]; then
+			# Not enough space :(
+
+			# There is no way to make sure the output appear on
+			# stdout and in the terminal.
+
+			# Clear the status lines.
+			tput AL $maxli
+			# Request later redrawing of the status lines.
+			redraw=1
+			# Remember the failure to ensure terminal output.
+			status=1
+		elif [ $((lines + count)) -ge $maxli ]; then
+			# Barely enough space :|
+
+			# Not enough to draw the status lines, though.
+
+			# Move the status lines down behind the position where
+			# the output will end.
+			tput AL $lines
+
+			# Draw the output.
+			echo "$output"
+
+			# Save cursor where status lines should appear and go
+			# up to where the output should start.
+			tput cr sc UP $lines
+			# Request later redrawing of the status lines.
+			redraw=1
+		else
+			# Enough space :)
+
+			# Move the status lines down behind the position where
+			# the output will end.
+			tput AL $lines
+
+			# Draw the output and the status lines, in case they
+			# got moved out of the terminal window.
+			echo "$output"
+			echo -n "$buffer"
+
+			# Go to the beginning of the status lines, save cursor,
+			# go up to where output should start.
+			tput cr UP $((count - 1)) sc UP $lines
+		fi
+	fi > /dev/tty
+
+	#
+	# Finally produce the output on stdout.
+	#
+	echo "$output"
+
+	# Deal with stuff that happens when output is redirected or too long.
+	if [ -n "$visible" ]; then
+		# Go to where the status output should appear at least
+		# if where that is, is known.
+		test $status -eq 0 && tput rc
+		# If necessary redraw
+		test -n "$redraw" && $this.draw 
+	fi > /dev/tty
+
+	return $status
 }
 
+#
+# Does the same as the stdout() method on stderr.
+#
+# @param @
+#	The text to output.
+# @return
+#	False (1), if the output was not drawn on the terminal,
+#	true (0) otherwise.
+#
 bsda:tty:Terminal.stderr() {
-	local active
-
-	$this.getActive active
-
-	#TODO
+	bsda:tty:Terminal.stdout "$@" 1>&2
 }
 
