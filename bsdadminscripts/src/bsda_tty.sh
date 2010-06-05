@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2009
+# Copyright (c) 2009, 2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -65,6 +65,7 @@ readonly bsda_tty_ERR_TERMINAL_STATUSPROVIDER_INVALID=1
 readonly bsda_tty_ERR_TERMINAL_LINEINDEX_OUT_OF_BOUNDS=2
 readonly bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST=3
 readonly bsda_tty_ERR_TERMINAL_LINEINDEX_NOT_A_NUMBER=4
+readonly bsda_tty_ERR_TERMINAL_LINECOUNT_NOT_UINT=5
 
 #
 # An error storage variable.
@@ -191,11 +192,12 @@ bsda:tty:Library.format() {
 	IFS='
 '
 
-	# TODO add support for all printf padding options
+	#TODO add support for all printf padding options
 	outvar="$1"
 	pattern="$2"
 	shift 2
 	columns=$(test -e /dev/tty && tput co 2> /dev/tty || echo 80)
+	tput xn || columns=$((columns - 1))
 
 	#
 	# Normally the format pattern is parsed two times. The first time
@@ -492,6 +494,8 @@ bsda:tty:Terminal.deactivate() {
 #
 # @param 1
 #	The number of status lines to use.
+# @throws bsda_tty_ERR_TERMINAL_LINECOUNT_NOT_UINT
+#	Thrown if the provided number of lines is not an unsigned integer.
 #
 bsda:tty:Terminal.use() {
 	local IFS active count buffer providers provider index visible
@@ -502,7 +506,11 @@ bsda:tty:Terminal.use() {
 	IFS='
 '
 
-	#TODO Exceptions for invalid numbers.
+	# The line count must be a positive integer.
+	if ! bsda:obj:isUInt "$1"; then
+		bsda_tty_errno=$bsda_tty_ERR_TERMINAL_LINECOUNT_NOT_UINT
+		return 1
+	fi
 
 	#
 	# Two cases, the new number of lines is greater or smaller.
@@ -548,6 +556,8 @@ bsda:tty:Terminal.use() {
 	$this.setBuffer "$buffer"
 	$this.setCount $1
 	test -n "$visible" && $this.show
+
+	return 0
 }
 
 #
