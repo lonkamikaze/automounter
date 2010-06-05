@@ -1,22 +1,15 @@
-. bsda_tty.sh
+#!/bin/sh
+. ./bsda_tty.sh
 bsda:tty:Terminal term
 class=bsda:tty:Terminal
 $term.use 6
 $term.line 0 '------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------'
 index=0
 for file in *; do
-#	if [ $index -eq 0 ]; then
-#		$term.hide
-#		$term.getBuffer
-#		$term.show
-#	fi
-	#sleep 0.2
-	#echo "$file" | $term.stdout
-	$term.stderr "$file"
-	$term.line $((index % 5  + 1)) "$(printf "%03d - %s" $((index + 1)) "$file" )"
+	$term.stdout "$file"
+	$term.format status '<03:d>: <x-:s>' $index "$file"
+	$term.line $((index % 5  + 1)) "$status"
 	index=$((index + 1))
-	#sleep 0.2
 done
-ls -f | grep -n '' | $term.stderr
-#sleep 3
+ls -f | grep -n '' | $term.stdout
 $term.delete
