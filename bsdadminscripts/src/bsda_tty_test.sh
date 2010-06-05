@@ -1,4 +1,4 @@
-#!/bin/sh -f
+#!/bin/sh
 bsda_dir="${0%${0##*/}}"
 . ${bsda_dir:-.}/bsda_tty.sh
 bsda:tty:Terminal term
