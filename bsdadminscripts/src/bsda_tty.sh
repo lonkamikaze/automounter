@@ -42,8 +42,8 @@ bsda_tty=1
 #	restore_cursor		rc
 #	cursor_address		cm #1 #2
 #	cursor_home		ho
-#	columns			co
-#	lines			li
+#	columns			co => #
+#	lines			li => #
 #	clr_eol			ce
 #	clr_eos			cd
 #	delete_line		dl
@@ -58,6 +58,8 @@ bsda_tty=1
 #	newline			nw
 #	cursor_down		do
 #	cursor_up		up
+#	eat_newline_glitch	xn
+#	init_tabs		it => #
 #
 
 # Terminal exceptions.
@@ -451,6 +453,9 @@ bsda:tty:Terminal.getDisplayCount() {
 # I.e. it returns the top left part of the buffer cropped to the
 # appropriate width and height.
 #
+# Tabs break this, multibyte characters might result in too strong
+# line shortage.
+#
 # @param &1
 #	The displayable buffer portion.
 #
@@ -467,12 +472,16 @@ bsda:tty:Terminal.getDisplayBuffer() {
 	# Get the number of status lines to display and acquire them
 	# from the buffer. Reduce them to the permitted number of collumns.
 	$this.getDisplayCount count
-	buffer="$(
-		$this.getBuffer \
-			| head -n $count \
-			| sed -E "s/(.{$maxco}).*/\\1/"
-		printf .
-	)"
+	if [ $count -gt 0 ]; then
+		buffer="$(
+			$this.getBuffer \
+				| head -n $count \
+				| sed -E "s/(.{$maxco}).*/\\1/"
+			printf .
+		)"
+	else
+		buffer=
+	fi
 
 	# Return the buffer.
 	$caller.setvar "$1" "${buffer%$IFS.}"
@@ -943,18 +952,14 @@ bsda:tty:Terminal.line() {
 # on the terminal unless the output was too long to display on the terminal in
 # one chunk.
 #
-# Characters spacing more than one column (i.e. tabs) will break this.
-# Multibyte characters might break as well, this depends on sed(1).
+# Multibyte characters might break this, it depends on awk(1).
 #
 # @param @
 #	The text to output.
-# @return
-#	False (1), if the output was not drawn on the terminal,
-#	true (0) otherwise.
 #
 bsda:tty:Terminal.stdout() {
-	local IFS output draw active visible count maxli maxco lines redraw
-	local status glitch
+	local IFS output draw active visible count maxli maxco lines
+	local glitch tabstops
 
 	IFS='
 '
@@ -971,107 +976,75 @@ bsda:tty:Terminal.stdout() {
 	else
 		output="$(cat)"
 	fi
+	# Make sure the output ends with a newline.
+	output="${output%$IFS}$IFS"
 
 	#
 	# Perform all the fancy terminal handling like output faking, status
 	# line drawing and cursor placing.
 	#
 
-	# If the entire output uses more lines than available from the
-	# terminal, the status lines need redrawing after performing regular
-	# output.
-	redraw=
 	# The return value.
 	status=0
 	# Only perform all that fancy stuff in visible mode.
 	if [ -n "$visible" ]; then
-		# Get the maximum lines and columns from the terminal.
-		maxli=$(tput li 2> /dev/tty || echo 24)
-		maxco=$(tput co 2> /dev/tty || echo 80)
-
-		# Set this to * if the terminal breaks with exactly maxco long
-		# lines, else set this to +.
-		glitch='*'
-		tput xn && glitch='+'
-
 		# Get the number of status lines to display and acquire them
 		# from the buffer.
 		$this.getDisplayCount count
 		$this.getDisplayBuffer buffer
 
-		# Count the lines the output will use on the terminal, to do
-		# this lines longer than maxco are split before counting, that is what the
-		# fancy sed(1) command does.
-		lines=$(
-			echo "$output" \
-				| sed -E "/.{$maxco}.$glitch/s/.{$maxco}/&\\$IFS/${IFS}P${IFS}D" \
-				| wc -l
-		)
+		# Get the maximum lines and columns from the terminal.
+		maxli=$(tput li 2> /dev/tty || echo 24)
+		maxli=$((maxli - count))
+		maxco=$(tput co 2> /dev/tty || echo 80)
+		# Get the tab stop width.
+		tabstops=$(tput it)
 
-		# Three cases, we might have enough space to draw everything,
-		# just the output, or the output is too long.
-		if [ $lines -ge $maxli ]; then
-			# Not enough space :(
+		# Set this to 0 if the terminal eats the newline glitch,
+		# otherwise set it to 1.
+		tput xn
+		glitch=$?
 
-			# There is no way to make sure the output appear on
-			# stdout and in the terminal.
+		# Output output chunks until nothing is left to output.
+		while [ -n "$output" ]; do
+			# Get the lines to output this round.
+			draw="$(
+				echo "$output" \
+					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
+				printf .$?
+			)"
+			# The number of lines are returned by the script.
+			lines=${draw##*.}
+			draw="${draw%.*}"
 
-			# Clear the status lines.
-			tput AL $maxli
-			# Request later redrawing of the status lines.
-			redraw=1
-			# Remember the failure to ensure terminal output.
-			status=1
-		elif [ $((lines + count)) -ge $maxli ]; then
-			# Barely enough space :|
-
-			# Not enough to draw the status lines, though.
-
-			# Move the status lines down behind the position where
-			# the output will end.
-			tput AL $lines
-
-			# Draw the output.
-			echo "$output"
-
-			# Save cursor where status lines should appear and go
-			# up to where the output should start.
-			tput cr sc UP $lines
-			# Request later redrawing of the status lines.
-			redraw=1
-		else
-			# Enough space :)
+			# Remove the current draw from the remaining output.
+			output="${output#$draw}"
 
 			# Move the status lines down behind the position where
 			# the output will end.
-			tput AL $lines
+			tput AL $lines > /dev/tty
 
 			# Draw the output and the status lines, in case they
 			# got moved out of the terminal window.
-			echo "$output"
-			echo -n "$buffer"
+			echo -n "$draw" > /dev/tty
+			echo -n "$buffer" > /dev/tty
 
 			# Go to the beginning of the status lines, save cursor,
 			# go up to where output should start.
-			tput cr UP $((count - 1)) sc UP $lines
-		fi
-	fi > /dev/tty
+			tput cr UP $((count - 1)) sc UP $lines > /dev/tty
 
-	#
-	# Finally produce the output on stdout.
-	#
-	echo "$output"
+			# Finally put the output on stdout.
+			echo -n "$draw"
 
-	# Deal with stuff that happens when output is redirected or too long.
-	if [ -n "$visible" ]; then
-		# Go to where the status output should appear at least
-		# if where that is, is known.
-		test $status -eq 0 && tput rc
-		# If necessary redraw
-		test -n "$redraw" && $this.draw 
-	fi > /dev/tty
+			# Restore cursor position.
+			tput rc > /dev/tty
+		done
+	else
+		# Simply output stuff.
+		echo -n "$output"
+	fi
 
-	return $status
+	return 0
 }
 
 #
