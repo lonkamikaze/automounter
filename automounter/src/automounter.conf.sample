@@ -26,8 +26,8 @@
 # towards early unmounting. Increase these values to be less aggressive.
 #
 
-#c=10
-#w=5
+#c=4
+#w=2
 
 ###
 # You can change the directory that is populated with mountpoints, e.g. to
@@ -71,7 +71,7 @@
 #
 # Without this workaround all files in a fuse based file system will be closed
 # whenever amd tries to unmount. With the default settings that means
-# every second.
+# every 2 seconds.
 #
 
 #evil_fuse=1

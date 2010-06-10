@@ -25,8 +25,8 @@ version=1.4.3
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
-c=10
-w=5
+c=4
+w=2
 l="%%RUN%%/automounter.amd.log"
 directory="%%RUN%%/automounter.amd.mnt"
 map="%%RUN%%/automounter.amd.map"
@@ -424,9 +424,6 @@ writeNode() {
 	# Skip on unknown types.
 	test "$type" = "label" && return 3
 
-	# Use the device name for empty labels.
-	test -z "${label#$type/}" && label="$label$device"
-
 	# Remember node.
 	echo "$device;$label" >> "$nodes"
 
@@ -585,6 +582,8 @@ glabelDetect() {
 
 		# Finally we can set up a mount.
 		label="$line"
+		# Use the device name for empty labels.
+		test -z "${label#*/}" && label="$label$device"
 
 		# This is in the list of already probed devices. Do not check
 		# the device node to be able to follow label changes.
