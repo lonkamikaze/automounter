@@ -35,6 +35,13 @@ bsda_tty=1
 # a way that the using code does not have to know whether /dev/stdout
 # and /dev/stderr are the terminal or a file.
 #
+# Tested on:
+#	TERM		ISSUES
+#	xterm		flickers
+#	cons25
+#	jfbterm		flickers
+#	rxvt-unicode
+#
 
 #
 # A list of useful termcap(5) capabilities, used with tput(1):
@@ -52,8 +59,8 @@ bsda_tty=1
 #	cursor_invisible	vi
 #	cursor_normal		ve
 #	cursor_visible		vs
-#	parm_down_cursor	DO #1
-#	parm_up_cursor		UP #1
+#	parm_down_cursor	DO #1	fails on jfbterm, use jot -b do #1
+#	parm_up_cursor		UP #1	fails on jfbterm, use jot -b up #1
 #	carriage_return		cr
 #	newline			nw
 #	cursor_down		do
@@ -329,7 +336,7 @@ bsda:obj:createInterface bsda:tty:StatusProvider \
 #
 # For convenience it also inherits the methods of the helper function library.
 #
-bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library\
+bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library \
 	w:private:active \
 		"Terminal control active flag." \
 	w:private:count \
@@ -425,7 +432,7 @@ bsda:tty:Terminal.draw() {
 	$this.getDisplayBuffer buffer
 	tput cr AL $count
 	echo -n "$buffer"
-	tput cr UP $((count - 1))
+	tput cr $(test $count -gt 1 && jot -b up $((count - 1)))
 }
 
 #
@@ -927,11 +934,11 @@ bsda:tty:Terminal.line() {
 		line="$(echo "$2" | sed -E -e '1!d' -e "1s/(.{$maxco}).*/\\1/")"
 
 		# Jump to the right line.
-		tput cr DO $pos ce
+		tput cr $(test $pos -gt 0 && jot -b do $pos) ce
 		# Draw it.
 		echo -n "$line"
 		# Return the cursor to its origin.
-		tput cr UP $pos
+		tput cr $(test $pos -gt 0 && jot -b up $pos)
 	fi > /dev/tty
 
 	# Store the new line in the status line buffer.
@@ -997,6 +1004,7 @@ bsda:tty:Terminal.stdout() {
 		maxli=$(tput li 2> /dev/tty || echo 24)
 		maxli=$((maxli - count))
 		maxco=$(tput co 2> /dev/tty || echo 80)
+
 		# Get the tab stop width.
 		tabstops=$(tput it)
 
@@ -1009,12 +1017,12 @@ bsda:tty:Terminal.stdout() {
 		while [ -n "$output" ]; do
 			# Get the lines to output this round.
 			draw="$(
-				echo "$output" \
+				echo -n "$output" \
 					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
 				printf .$?
 			)"
-			# The number of lines are returned by the script.
-			lines=${draw##*.}
+			# The number of lines is returned by the script.
+			lines="${draw##*.}"
 			draw="${draw%.*}"
 
 			# Remove the current draw from the remaining output.
@@ -1026,17 +1034,18 @@ bsda:tty:Terminal.stdout() {
 
 			# Draw the output and the status lines, in case they
 			# got moved out of the terminal window.
-			echo -n "$draw" > /dev/tty
-			echo -n "$buffer" > /dev/tty
+			echo -n "$draw$buffer" > /dev/tty
 
 			# Go to the beginning of the status lines, save cursor,
 			# go up to where output should start.
-			tput cr UP $((count - 1)) sc UP $lines > /dev/tty
+			tput cr $(test $count -gt 1 && jot -b up $((count - 1))) sc \
+				$(jot -b up $lines) > /dev/tty
 
 			# Finally put the output on stdout.
 			echo -n "$draw"
 
-			# Restore cursor position.
+			# Restore cursor position, in case the output was
+			# redirected.
 			tput rc > /dev/tty
 		done
 	else

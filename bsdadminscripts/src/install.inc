@@ -16,6 +16,7 @@ buildflags.conf.1,0644,%%MAN%%/man1/buildflags.conf.1.gz
 buildflags.mk.1,0644,%%MAN%%/man1/buildflags.mk.1.gz
 distviper,0755,%%PREFIX%%/sbin/distviper
 distviper.1,0644,%%MAN%%/man1/distviper.1.gz
+head.awk,0755,%%DATADIR%%/head.awk
 pkg_libchk,0755,%%PREFIX%%/sbin/pkg_libchk
 pkg_libchk.1,0644,%%MAN%%/man1/pkg_libchk.1.gz
 pkg_upgrade,0755,%%PREFIX%%/sbin/pkg_upgrade

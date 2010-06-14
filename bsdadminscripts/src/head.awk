@@ -70,12 +70,19 @@ BEGIN {
 }
 
 function process(char) {
-	# Take newline glitch into account.
-	# Don't eat it, because that would break redirected output.
-	if (GLITCH && xpos == MAXCO && (char == "\n" || char == "\t")) {
+	# Detect overflowing lines on terminals with the newline glitch.
+	if (GLITCH && xpos == MAXCO) {
 		line++;
-		if (char == "\t")
-			xpos = 0;
+		xpos = 0;
+	}
+
+	# Detect overflowing lines on newline glitch eating terminals.
+	if (!GLITCH && xpos == MAXCO && char != "\n" && char != "\r") {
+		# Eat tabs after a line overflow.
+		eattabs = 1;
+		# Transition into the next line.
+		line++;
+		xpos = 0;
 	}
 
 	# Stop when the wanted line is met.
@@ -83,13 +90,12 @@ function process(char) {
 	if (line >= MAXLI && !(eattabs && char == "\t"))
 		exit(line);
 
-	# Calculate the new xpos, line.
-	if (char == "\n" || xpos == MAXCO) {
-		# Eat tabs after a line overflow.
-		if (!glitch && char != "\n")
-			eattabs = 1;
+	# Calculate the xpos, line, behind this char.
+	if (char == "\n") {
 		# Transition into the next line.
 		line++;
+		xpos = 0;
+	} else if (char == "\r") {
 		xpos = 0;
 	} else if (char == "\t") {
 		if (!eattabs) {
