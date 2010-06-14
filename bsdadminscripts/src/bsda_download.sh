@@ -705,12 +705,12 @@ bsda:download:Servers.popMirror() {
 #
 # Returns the sum of active downloads over all servers.
 #
-# @param 1
+# @param &1
 #	The name of the variable to store the number of currently active
 #	downloads in.
-# @param 2
+# @param &2
 #	The number of servers the downloads are distributed over.
-# @param 3
+# @param &3
 #	The number of all servers.
 #
 bsda:download:Servers.getStatus() {
