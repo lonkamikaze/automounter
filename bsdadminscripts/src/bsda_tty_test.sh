@@ -12,4 +12,6 @@ for file in *; do
 	index=$((index + 1))
 done
 ls -f | grep -n '' | $term.stdout
+# Sleep to see whether status lines were preserved.
+sleep 1
 $term.delete
