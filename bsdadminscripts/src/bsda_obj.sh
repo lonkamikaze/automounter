@@ -67,6 +67,7 @@ bsda_obj=1
 # 12.2) bash - local
 # 12.3) bash - setvar
 # 12.4) bash - Command Substitution Variable Scope
+# 12.5) bash - alias
 # bsda:obj:createClass()
 # bsda:obj:createInterface()
 # bsda:obj:getVar()
@@ -797,6 +798,12 @@ bsda_obj=1
 #	test=a
 #	echo $test$(test=b)$test
 #
+# 12.5) bash - alias
+#
+# The alias command in bash, used for inheritance in the framework, only works
+# in interactive mode. Hence all uses of alias had to be substituted with
+# slightly slower function wrappers.
+#
 
 #
 # The stack counter that holds the number of methods that currently
@@ -1165,7 +1172,9 @@ bsda:obj:createClass() {
 			fi
 
 			# Inherit method.
-			alias $class.${method##*:}=$parent.${method##*:}
+			# Alias does not work in bash unless interactve
+			#alias $class.${method##*:}=$parent.${method##*:}
+			eval "$class.${method##*:}() { $parent.${method##*:} \"\$@\"; }"
 		done
 
 		# Update the list of methods.

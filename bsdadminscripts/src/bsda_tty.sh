@@ -41,6 +41,9 @@ bsda_tty=1
 #	cons25
 #	jfbterm		flickers
 #	rxvt-unicode
+# Third party tested:
+#	screen
+#	xterm-color
 #
 
 #
@@ -428,8 +431,7 @@ bsda:tty:Terminal.draw() {
 	IFS='
 '
 
-	$this.getDisplayCount count
-	$this.getDisplayBuffer buffer
+	$this.getDisplayBuffer buffer count
 	tput cr AL $count
 	echo -n "$buffer"
 	tput cr $(test $count -gt 1 && jot -b up $((count - 1)))
@@ -465,6 +467,8 @@ bsda:tty:Terminal.getDisplayCount() {
 #
 # @param &1
 #	The displayable buffer portion.
+# @param &2
+#	The length of the buffer in lines.
 #
 bsda:tty:Terminal.getDisplayBuffer() {
 	local IFS count maxco buffer
@@ -492,6 +496,8 @@ bsda:tty:Terminal.getDisplayBuffer() {
 
 	# Return the buffer.
 	$caller.setvar "$1" "${buffer%$IFS.}"
+	# Return the buffer length.
+	$caller.setvar "$2" $count
 }
 
 #
@@ -972,9 +978,8 @@ bsda:tty:Terminal.stdout() {
 '
 
 	# Check whether tty operations are activated.
-	visible=
 	$this.getActive active
-	test -n "$active" && $this.getVisible visible
+	$this.getVisible visible
 
 	# Take output either from arguments, or if none are provided from
 	# stdin.
@@ -987,22 +992,11 @@ bsda:tty:Terminal.stdout() {
 	output="${output%$IFS}$IFS"
 
 	#
-	# Perform all the fancy terminal handling like output faking, status
-	# line drawing and cursor placing.
+	# Get all the stuff needed to know for output duplication.
 	#
-
-	# The return value.
-	status=0
-	# Only perform all that fancy stuff in visible mode.
-	if [ -n "$visible" ]; then
-		# Get the number of status lines to display and acquire them
-		# from the buffer.
-		$this.getDisplayCount count
-		$this.getDisplayBuffer buffer
-
+	if [ -n "$active" ]; then
 		# Get the maximum lines and columns from the terminal.
 		maxli=$(tput li 2> /dev/tty || echo 24)
-		maxli=$((maxli - count))
 		maxco=$(tput co 2> /dev/tty || echo 80)
 
 		# Get the tab stop width.
@@ -1012,6 +1006,27 @@ bsda:tty:Terminal.stdout() {
 		# otherwise set it to 1.
 		tput xn
 		glitch=$?
+	fi
+
+	#
+	# Perform all the fancy terminal handling like output faking, status
+	# line drawing and cursor placing.
+	#
+
+	# The return value.
+	status=0
+	# Only perform all that fancy stuff in visible mode.
+	if [ -n "$visible" -a $maxli -gt 1 ]; then
+		# Get the number of status lines to display and acquire them
+		# from the buffer.
+		$this.getDisplayBuffer buffer count
+
+		# Get the maximum lines left for output.
+		if [ $((count)) -eq 0 ]; then
+			maxli=$((maxli - 1))
+		else
+			maxli=$((maxli - count))
+		fi
 
 		# Output output chunks until nothing is left to output.
 		while [ -n "$output" ]; do
@@ -1040,6 +1055,41 @@ bsda:tty:Terminal.stdout() {
 			# go up to where output should start.
 			tput cr $(test $count -gt 1 && jot -b up $((count - 1))) sc \
 				$(jot -b up $lines) > /dev/tty
+
+			# Finally put the output on stdout.
+			echo -n "$draw"
+
+			# Restore cursor position, in case the output was
+			# redirected.
+			tput rc > /dev/tty
+		done
+	elif [ -n "$active" -a $maxli -gt 1 ]; then
+		# We are not visible, but active. I.e. perform output duplication.
+
+		# One line is needed to place the cursor there after printing.
+		maxli=$((maxli - 1))
+
+		# Output output chunks until nothing is left to output.
+		while [ -n "$output" ]; do
+			# Get the lines to output this round.
+			draw="$(
+				echo -n "$output" \
+					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
+				printf .$?
+			)"
+			# The number of lines is returned by the script.
+			lines="${draw##*.}"
+			draw="${draw%.*}"
+
+			# Remove the current draw from the remaining output.
+			output="${output#$draw}"
+
+			# Draw the output.
+			echo -n "$draw" > /dev/tty
+
+			# Save the cursor position and go up to where output
+			# should start.
+			tput sc $(jot -b up $lines) > /dev/tty
 
 			# Finally put the output on stdout.
 			echo -n "$draw"

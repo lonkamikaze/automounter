@@ -20,13 +20,15 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 0.99
+# version 0.999
 
 #
 # Outputs a given number of lines, unlike head(1) lines are counted as they
 # appear on the terminal.
 #
 # The properties of the terminal have to be supplied as parameters.
+#
+# Supports single spaced UTF-8 multibyte characters if LANG is set accordingly.
 #
 # @param 1
 #	The number of terminal columns "tput co".
@@ -66,9 +68,57 @@ BEGIN {
 	eattabs = 0;
 
 	# Don't eat new lines.
-	RS = null;
+	if (ENVIRON["LANG"] ~ "\.UTF-8$")
+		utf8 = 1;
 }
 
+#
+# Merge UTF-8 bytes to a single char.
+#
+# This breaks with wide characters, if only there was a table ...
+#
+# This is broken by characters more than one terminal column wide (such as
+# CJK characters). This cannot be solved by a table, because printing
+# width depends on the font.
+#
+function filterUtf8(char) {
+	if (utf8) {
+		if (filterUtf8Expected) {
+			# Collect multibyte char bytes.
+			filterUtf8Expected--;
+			filterUtf8Char = filterUtf8Char char;
+			if (!filterUtf8Expected) {
+				process(filterUtf8Char);
+			}
+		} else {
+			if (char <= "\x7f") {
+				# US-ASCII 1 byte char
+				process(char);
+			} else if (char <= "\xc1") {
+				# Invalid char, ignore it!
+			} else if (char <= "\xdf") {
+				# 2-byte char
+				filterUtf8Expected = 1;
+				filterUtf8Char = char;
+			} else if (char <= "\xef") {
+				# 3-byte char
+				filterUtf8Expected = 2;
+				filterUtf8Char = char;
+			} else if (char <= "\xf4") {
+				# 4-byte char
+				filterUtf8Expected = 3;
+				filterUtf8Char = char;
+			} else {
+				# Restricted by RFC 3629, or invalid
+			}
+		}
+	} else
+		process(char);
+}
+
+#
+# Calculate line and column, terminate as appropriate.
+#
 function process(char) {
 	# Detect overflowing lines on terminals with the newline glitch.
 	if (GLITCH && xpos == MAXCO) {
@@ -77,7 +127,7 @@ function process(char) {
 	}
 
 	# Detect overflowing lines on newline glitch eating terminals.
-	if (!GLITCH && xpos == MAXCO && char != "\n" && char != "\r") {
+	if (!GLITCH && xpos == MAXCO && char != "\n" && char != "\r" && char != "\f" && char != "\v") {
 		# Eat tabs after a line overflow.
 		eattabs = 1;
 		# Transition into the next line.
@@ -95,7 +145,13 @@ function process(char) {
 		# Transition into the next line.
 		line++;
 		xpos = 0;
+	} else if (char == "\f" || char == "\v") {
+		# Form feed or vertical tab.
+		line++;
+		if (xpos >= MAXCO)
+			xpos = MAXCO - 1;
 	} else if (char == "\r") {
+		# Carriage return.
 		xpos = 0;
 	} else if (char == "\t") {
 		if (!eattabs) {
@@ -105,11 +161,17 @@ function process(char) {
 			if (xpos >= MAXCO)
 				xpos = MAXCO - 1;
 		}
+	} else if (char == "\a") {
+		# Bell character, does not change cursor.
+	} else if (char == "\b") {
+		# Backspace
+		if (xpos > 0)
+			xpos--;
 	} else
 		xpos++;
 
 	# Turn off tab eating.
-	if (char != "\t")
+	if (char != "\t" && char != "\a")
 		eattabs = 0;
 
 	# Finally, print the character.
@@ -119,10 +181,14 @@ function process(char) {
 {
 	split($0, chars, "");
 	for (i = 1; i <= length(chars); i++)
-		process(chars[i]);
+		filterUtf8(chars[i]);
+	filterUtf8("\n");
 }
 
 END {
-	process("\n");
+	if (!line)
+		filterUtf8("\n");
+
 	exit(line);
 }
+
