@@ -15,21 +15,24 @@ Hannes Hauswedell is the originator of the KPorts project and a member of
 the BSDForen.de team.
 The KPorts project can be found at http://kports.sf.net/.
 
-- pit234a from the BSDForen.de community  (January 29, 2009)
+- pit234a from the BSDForen.de community  (29 January 2009)
 For pointing out an error in distviper.
 
-- *Sheep and pit234a from the BSDForen.de community (January 26, 2009)
+- *Sheep and pit234a from the BSDForen.de community (26 January 2009)
 For suggesting the name distviper in a massive brainstorming effort of the
 BSDForen.de community.
 
-- E. J. Cerejo (February 12, 2008)
+- E. J. Cerejo (12 February 2008)
 For tirelessly testing pkg_libchk and with his feedback allowing me to
 highly improve the false positive checking and thus making it a more
 accurate and useful tool.
 This has lead to the changes from version 1.0 to 1.2 of pkg_libchk.
 
-- George L. Yermulnik (May 30, 2006)
+- George L. Yermulnik (30 May 2006)
 For testing, feedback and providing patches to make rcstart FreeBSD 4
 compatible.
 This has lead to the changes from version 1.0 to 1.1 of rcstart.
+
+- Marcin Wisnicki, on freebsd-ports@freebsd.org (29 July 2010)
+For his description of a great INDEX format design.
 

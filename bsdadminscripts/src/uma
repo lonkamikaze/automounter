@@ -76,7 +76,7 @@ fi
 : ${PACKAGEROOT="ftp://ftp.freebsd.org"}
 : ${ARCH="$(uname -m)"}
 branch="$(uname -r | tr '[:upper:]' '[:lower:]')"
-number="${branch%%.*}"
+number="${branch%%-*}"
 branch="${branch##*-}"
 case "$branch" in
 	release)
