@@ -11,4 +11,6 @@
 * Add an "ambiguous package name" message, instead of the "not in index", when
   multiple packages match, also list the possible candidates
 * Improve the documentation of -d
+* Imitate pkg_add's "-C, --chroot chrootdir" command, too bad -C is already in
+  use
 
