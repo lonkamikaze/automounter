@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 1.13
+# version 1.14
 
 # Include once.
 test -n "$bsda_obj" && return 0
@@ -846,7 +846,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # The interpreting shell command. This can be used when this information is
 # needed by other programs like lockf(1).
 #
-readonly bsda_obj_interpreter="$(/bin/ps -o args= -p $$ | /usr/bin/sed "s, $0${*:+ $*}\$,,1")"
+readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $0${*:+ $*}\$,,1" -e 's,^\[,,' -e 's,]$,,')"
 
 #
 # This is used as a buffer during deep serialization.
