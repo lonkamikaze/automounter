@@ -173,7 +173,7 @@ bsda_obj=1
 # methods, this is considered good style.
 #
 # NOTE: If the init method does not return 0 the object is instantly
-#	destroyed and the return value forwarded to the caller.
+#	destroyed and the return value is forwarded to the caller.
 #	The caller then has a reference to a no longer existing object
 #	and does not know about it, unless the return value of the
 #	constructor is checked.
@@ -186,6 +186,15 @@ bsda_obj=1
 # an init or cleanup method.
 # The remaining init and cleanup methods might continue to exist as regular
 # methods, if their names do not conflict.
+#
+# Inherited methods become part of a class. Thus inherited private methods
+# are readily available to every method of the class, even new methods or
+# methods inherited from different classes.
+#
+# It also means that even instances of the originating class do not have
+# access to private methods. This behaviour contradicts common expectations.
+# The different paradigm is that access scope in this framework manages
+# access to the current context instead of access to certain code.
 #
 # 1.3) Access Scope
 #
@@ -729,7 +738,7 @@ bsda_obj=1
 # painful.
 #
 # The serialization relies on external commands that might not be present
-# everywhere, namely xxd(1) and rs(1).
+# everywhere, namely b64encode(1) and b64decode(1)
 #
 # Compatibilty hacks can be found at the very end of the file. This chapter
 # describes some of the differences between FreeBSD sh and bash that one
@@ -825,7 +834,7 @@ bsda_obj_callStackCount=0
 # This is what the first part of this ID takes care of, by adding a hex
 # encoded 64bit random number.
 #
-readonly bsda_obj_sessionId=$(dd bs=8 count=1 < /dev/random 2> /dev/null  | xxd -p)_$(date -u '+%s')
+readonly bsda_obj_sessionId=$(/bin/dd bs=8 count=1 < /dev/random 2> /dev/null  | /usr/bin/od -vA n -t x1 | /usr/bin/awk 'BEGIN {RS = " "} {printf $0}')_$(/bin/date -u '+%s')
 
 #
 # This is a prefix to every object ID and should be the same among all
@@ -837,7 +846,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # The interpreting shell command. This can be used when this information is
 # needed by other programs like lockf(1).
 #
-readonly bsda_obj_interpreter="$(ps -o args= -p $$ | sed "s, $0${*:+ $*}\$,,1")"
+readonly bsda_obj_interpreter="$(/bin/ps -o args= -p $$ | /usr/bin/sed "s, $0${*:+ $*}\$,,1")"
 
 #
 # This is used as a buffer during deep serialization.
@@ -1189,8 +1198,8 @@ bsda:obj:createClass() {
 
 
 	# Get the super methods, first class wins.
-	test -z "$init" -a -n "$superInit" && init="$class.superInit"
-	test -z "$clean" -a -n "$superClean" && clean="$class.superClean"
+	test -z "$init" -a -n "$superInit" && init="$superInit"
+	test -z "$clean" -a -n "$superClean" && clean="$superClean"
 
 	# Manage implements.
 	for interface in $implements; do
@@ -1221,14 +1230,16 @@ bsda:obj:createClass() {
 	# If a method is defined more than once, the widest scope wins.
 	# Go through the methods sorted by method name.
 	previousMethod=
+	method="$methods"
+	methods=
 	scope=
-	for method in $(methods=; echo "$methods" | sort -t: -k2); do
+	for method in $(echo "$method" | /usr/bin/sort -t: -k2); do
 		# Check whether the previous and the current method were the
 		# same.
 		if [ "$previousMethod" != "${method##*:}" ]; then
 			# If all scopes of this method have been found,
 			# store it in the final list.
-			methods="${methods:+$methods${previousMethod:+$IFS$scope:$previousMethod}}"
+			methods="${methods:+$methods${previousMethod:+$IFS}}${previousMethod:+$scope:$previousMethod}"
 			scope="${method%:*}"
 		else
 			# Widen the scope if needed.
@@ -1237,7 +1248,7 @@ bsda:obj:createClass() {
 					scope=public
 				;;
 				protected)
-					if [ "$scope" == "private" ]; then
+					if [ "$scope" = "private" ]; then
 						scope=protected
 					fi
 				;;
@@ -1255,8 +1266,7 @@ bsda:obj:createClass() {
 	# still belong to the the caller.
 	# These definitions are repeatedly subject to eval calls, hence
 	# the different escape depth which makes sure the variables
-	# are resolved at the right stage. This does not seem to be working
-	# with bash.
+	# are resolved at the right stage.
 	#
 
 	# Private methods allow the following kinds of access:
@@ -1314,7 +1324,7 @@ bsda:obj:createClass() {
 
 			# If this object construction is part of a copy() call,
 			# this constructor is done.
-			test -n \"$bsda_obj_doCopy\" && return 0
+			test -n \"\$bsda_obj_doCopy\" && return 0
 
 			${init:+
 				# Cast the reference variable from the parameters.
@@ -1391,7 +1401,7 @@ bsda:obj:createClass() {
 			serialized=
 			for attribute in \$(echo '$attributes'); do
 				serialized=\"\${serialized:+\$serialized;}\${this}\$attribute='\$(
-					eval \"printf '%s' \\\"\\\${\${this}\$attribute}\\\"\" | xxd -p | rs -T
+					eval \"printf '%s' \\\"\\\${\${this}\$attribute}\\\"\" | /usr/bin/b64encode - | /usr/bin/awk 'NR > 1 {printf line; line = \$0}'
 				)'\"
 			done
 			serialized=\"\$serialized;$class.deserialize \$this\"
@@ -1423,7 +1433,7 @@ bsda:obj:createClass() {
 
 			# Add this to the blacklist to prevent circular
 			# recursion.
-			bsda_obj_serializeBlacklist=\"\${bsda_obj_serializeBlacklist:+\$bsda_obj_serializeBlacklist;}\$this\"
+			bsda_obj_serializeBlacklist=\"\${bsda_obj_serializeBlacklist:+\$bsda_obj_serializeBlacklist$IFS}\$this\"
 
 			# Create a list of all referenced objects.
 			objects=\"\$(
@@ -1461,10 +1471,8 @@ bsda:obj:createClass() {
 	# parent class.
 	eval "
 		$class.superInit() {
-			${superInit:+local class}
-			${superInit:+class=$superInitParent}
 			${superInit:+$superInit \"\$@\"}
-			${superInit:-return}
+			return
 		}
 	"
 
@@ -1472,10 +1480,8 @@ bsda:obj:createClass() {
 	# parent class.
 	eval "
 		$class.superClean() {
-			${superClean:+local class}
-			${superClean:+class=$superCleanParent}
 			${superClean:+$superClean \"\$@\"}
-			${superClean:-return}
+			return
 		}
 	"
 
@@ -1493,7 +1499,7 @@ bsda:obj:createClass() {
 			# Deserialize attributes.
 			for attribute in \$(echo '$attributes'); do
 				setvar \"\$1\$attribute\" \"\$(
-					eval \"echo \\\"\\\${\$1\$attribute}\\\"\" | rs -T | xxd -r -p
+					eval \"echo \\\"\\\${\$1\$attribute}\\\"\" | /usr/bin/b64decode -pr
 				)\"
 			done
 		}
@@ -1700,7 +1706,7 @@ bsda:obj:createInterface() {
 	# A static type checker.
 	eval "
 		$interface.isInstance() {
-			echo \"\${1:-dummy}\$1\" | egrep -xq \"\${${interfacePrefix}instancePatterns}\"
+			echo \"\$1\" | egrep -xq \"\${${interfacePrefix}instancePatterns}\"
 		}
 	"
 
