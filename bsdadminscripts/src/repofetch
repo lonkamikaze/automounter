@@ -1,0 +1,421 @@
+#!/bin/sh -f
+#
+# Copyright (c) 2010
+# Dominic Fandrey <kamikaze@bsdforen.de>
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+readonly version=0.1
+
+# Get the execution path.
+bsda_dir="${0%${0##*/}}"
+
+# Include framework for object oriented shell scripting.
+. ${bsda_dir:-.}/bsda_obj.sh
+
+# Include downloader library.
+. ${bsda_dir:-.}/bsda_download.sh
+
+# Include the terminal library.
+. ${bsda_dir:-.}/bsda_tty.sh
+
+# Include scheduler library.
+. ${bsda_dir:-.}/bsda_scheduler.sh
+
+readonly rf_ERR_PARAM_COMMAND_UNKNOWN=1
+readonly rf_ERR_PARAM_SESSION_UNKNOWN=2
+readonly rf_ERR_PARAM_SESSION_CREATE_FAIL=3
+readonly rf_ERR_PARAM_SERVERS_FAIL=4
+readonly rf_ERR_PARAM_FETCH_DIR_MISSING=5
+
+# Session storage path.
+readonly rf_session_dir="$HOME/.repofetch"
+
+#
+# Returns whether the requested session exists.
+#
+# @param rf_session_name
+#	The session name.
+# @param rf_session_dir
+#	The default session location, used when rf_session does not contain
+#	path information.
+# @param rf_session_file
+#	Populates rf_session_file with the appropriate <path>/<filename>.
+# @return
+#	True (0) if the session exists, else false (1).
+rf_session_exists() {
+	rf_session_file="$rf_session_name"
+	if [ "$rf_session_name" = "${rf_session_name##*/}" ]; then
+		rf_session_file="$rf_session_dir/$rf_session_file"
+	fi
+
+	test -e "$rf_session_file"
+	return
+}
+
+#
+# Outputs the session file to stdout.
+#
+# This is expected to be used for deserializing:
+#	bsda:obj:deserialize rf_session "$(rf_session_read)"
+#
+# The rf_session_exists() function has to be run beforehand!
+#
+# @param rf_session_file
+#	The file containing the session data.
+# @return
+#	Whatever bunzip2(1) returned.
+#
+rf_session_read() {
+	bsda:obj:deserialize rf_session "$(/usr/bin/lockf -ks "$rf_session_file" /usr/bin/bunzip2 -c "$rf_session_file" 2> /dev/null)"
+}
+
+#
+# Expects data to write into the session file on stdin.
+#
+# This is expected to be used for serializing:
+#	$rf_session.serialize | rf_session_write
+#
+# The rf_session_exists() function has to be run beforehand!
+#
+# @param rf_session_file
+#	The file containing the session data.
+# @return
+#	Whatever bzip2(1) returned.
+#
+rf_session_write() {
+	/bin/mkdir -p "${rf_session_file%/*}"
+	$rf_session.serializeDeep | /usr/bin/lockf -ks "$rf_session_file" /usr/bin/bzip2 2> /dev/null > "$rf_session_file"
+}
+
+rf_session_delete() {
+	/bin/rm "$rf_session_file"
+}
+
+#
+# @param @
+#	The parameters to parse.
+# @param rf_terminal
+#	The terminal instance to use.
+# @param rf_session
+#	The session to use.
+#
+rf_init_params() {
+	local IFS arg master mirror mirrors servers manager
+
+	IFS='
+'
+
+	master=
+	mirrors=
+
+	while [ $# -gt 0 ]; do
+		arg="$1"
+		shift
+
+		case "$arg" in
+		--uma)
+			# Inject the UMA stuff into the parameters.
+			eval "$(uma env)"
+			set -- "$PACKAGESITE" $PACKAGESITE_MIRRORS "$@"
+		;;
+		'')
+		;;
+		*)
+			bsda:download:Server mirror "$arg"
+			if [ -z "$master" ]; then
+				master="$mirror"
+			else
+				mirrors="${mirrors:+$mirrors$IFS}$mirror"
+			fi
+		;;
+		esac
+	done
+
+	if [ -z "$master" ]; then
+		$rf_terminal.stderr "ERROR: No servers were specified!"
+		return $rf_ERR_PARAM_SERVERS_FAIL
+	fi
+	bsda:download:Servers servers $master $mirrors
+	$rf_session.registerServers $servers
+	bsda:download:Manager manager $servers
+	$rf_session.registerDownloader $manager
+}
+
+rf_init() {
+	if rf_session_exists; then
+		$rf_terminal.stderr "ERROR: Creating session '$rf_session_name' failed, because it already exists!"
+		return $rf_ERR_PARAM_SESSION_CREATE_FAIL
+	fi
+
+	rf:Session rf_session
+	rf_init_params "$@"
+	rf_session_write
+	return
+}
+
+rf_stop() {
+	if ! rf_session_exists; then
+		$rf_terminal.stderr "ERROR: The session '$rf_session_name' does not exist!"
+		return $rf_ERR_PARAM_SESSION_UNKNOWN
+	fi
+
+	rf_session_read
+	$rf_session.term
+}
+
+rf_term() {
+	rf_stop || return
+	rf_session_delete
+}
+
+#
+# @param @
+#	The parameters to parse.
+# @param rf_terminal
+#	The terminal instance to use.
+# @param rf_session
+#	The session to use.
+#
+rf_fetch_params() {
+	local IFS arg source targetDir target
+
+	IFS='
+'
+
+	targetDir="$(pwd)"
+
+	while [ $# -gt 0 ]; do
+		arg="$1"
+		shift
+
+		case "$arg" in
+		--dir)
+			arg="$1"
+			shift
+			targetDir="$arg"
+			# Relative paths are not acceptable, we cannot be
+			# certain the download manager is running from the
+			# same place.
+			if [ -n "${targetDir%%/*}" ]; then
+				# Prepend the current path.
+				targetDir="$(pwd)/$targetDir"
+			fi
+			if [ ! -d "$targetDir" ]; then
+				$rf_terminal.stderr "ERROR: '$targetDir' is not a directory!"
+				return $rf_ERR_PARAM_FETCH_DIR_MISSING
+			fi
+		;;
+		*)
+			target="$targetDir/${arg##*/}"
+			$rf_session.fetch "$arg" "$target"
+		;;
+		esac
+	done
+}
+
+rf_fetch() {
+	if ! rf_session_exists; then
+		$rf_terminal.stderr "ERROR: The session '$rf_session_name' does not exist!"
+		return $rf_ERR_PARAM_SESSION_UNKNOWN
+	fi
+
+	rf_session_read
+	rf_fetch_params "$@"
+	rf_session_write
+}
+
+rf_monitor() {
+	local interval
+
+	if ! rf_session_exists; then
+		$rf_terminal.stderr "ERROR: The session '$rf_session_name' does not exist!"
+		return $rf_ERR_PARAM_SESSION_UNKNOWN
+	fi
+
+	rf_session_read
+	
+	interval=1
+	if bsda:obj:isSimpleFloat "$1"; then
+		interval="$1"
+	fi
+
+	$rf_session.monitor $rf_terminal $interval
+}
+
+rf_sessions() {
+}
+
+
+bsda:obj:createClass rf:Session implements:bsda:scheduler:Process \
+	w:private:downloader \
+		"The download manager instance." \
+	w:private:servers \
+		"The download servers, a bsda:download:Servers instance." \
+	w:private:monitoring \
+		"Can be reset from a trap to deactivate the monitor." \
+	x:public:registerServers \
+		"Initial setting of servers." \
+	x:public:registerDownloader \
+		"Initial download manager registration." \
+	x:public:term \
+		"Stop the download manager." \
+	x:public:fetch \
+		"Fetch something." \
+	x:public:monitor \
+		"Show what's going on." \
+
+rf:Session.registerServers() {
+	local servers
+	$this.getServers servers
+
+	if [ -n "$servers" ]; then
+		# Really, servers should only be set once.
+		return 1
+	fi
+
+	$this.setServers "$1"
+	return 0
+}
+
+rf:Session.registerDownloader() {
+	local downloader
+	$this.getDownloader downloader
+
+	if [ -n "$downloader" ]; then
+		# Really, there's only one download manager per session.
+		return 1
+	fi
+
+	$this.setDownloader "$1"
+	return 0
+}
+
+rf:Session.term() {
+	local downloader
+	$this.getDownloader downloader
+
+	if ! bsda:download:Manager.isInstance "$downloader"; then
+		# Download manager not set WTF?
+		return 1
+	fi
+
+	$downloader.term
+	return 0
+}
+
+# @param 1
+#	The remote file name.
+# @param 2
+#	The local file name.
+rf:Session.fetch() {
+	local IFS downloader download jobs
+
+	IFS='
+'
+	$this.getDownloader downloader
+
+	if ! bsda:download:Manager.isInstance "$downloader"; then
+		# Download manager not set WTF?
+		return 1
+	fi
+
+	$downloader.createJob download "$1" "$2"
+}
+
+#
+# @param 1
+#	The terminal object to use.
+# @param 2
+#	The interval to update information.
+# 
+rf:Session.monitor() {
+	local terminal sleep servers downloader jobsActive serversActive
+	local serversCount jobs job i line null file progress speed unit
+	local size full
+
+	terminal="$1"
+
+	# Setup sleeper.
+	bsda:scheduler:Sleep sleep "$2"
+	$sleep.run
+
+	# Setup monitor running flag.
+	$this.setMonitoring 1
+
+	# Allow clean termination.
+	trap "unset ${this}monitoring" sigint sigkill
+
+	$this.getDownloader downloader
+	$this.getServers servers
+
+	# Start monitoring loop.
+	while $downloader.isActive && [ -n "$($this.getMonitoring)" ]; do
+		$downloader.run
+		$servers.getStatus jobsActive serversActive serversCount jobs
+		$terminal.use $((1 + jobsActive))
+		$terminal.line 0 "Downloading: $jobsActive/$serversActive/$serversCount"
+		i=0
+		for job in $jobs; do
+			i=$((i + 1))
+			$job.getStatus file size full null null progress speed
+			$terminal.convertBytes speed unit "$speed" 4
+			speed="$speed ${unit}b/s"
+			$terminal.convertBytes full unit "$full" 4
+			full="$full ${unit}b"
+			$terminal.convertBytesToUnit size "$unit" "$size" 4
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
+			$terminal.line $i "$line"
+		done
+		$sleep.run
+	done
+}
+
+#
+# Here we go, the first parameter always represents the session.
+# The second parameter represents the action to perform.
+#
+
+rf_session_name="$1"
+rf_command="$2"
+shift 2
+
+# We need a terminal for error output. It'll be thrown away should this
+# continue an active session.
+bsda:tty:Terminal rf_terminal
+
+# Check for a valid session command.
+readonly rf_session_commands="init
+stop
+resurrect
+term
+fetch
+monitor
+sessions"
+
+trap "$rf_terminal.delete" EXIT
+
+if ! echo "$rf_command" | /usr/bin/grep -qxF "$rf_session_commands"; then
+	$rf_terminal.stderr "ERROR: '$rf_command' is not a valid command."
+	return $rf_ERR_PARAM_COMMAND_UNKNOWN
+fi
+
+# Execute the given command.
+rf_$rf_command "$@"
+

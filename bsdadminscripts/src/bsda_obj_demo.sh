@@ -12,6 +12,7 @@
 #
 
 # Import framework.
+bsda_dir="${0%${0##*/}}"
 . ${bsda_dir:-.}/bsda_obj.sh
 
 # Declare the class.
