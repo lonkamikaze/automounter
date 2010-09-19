@@ -337,6 +337,8 @@ rf:Session.fetch() {
 	fi
 
 	$downloader.createJob download "$1" "$2"
+	# The download job is not really required in this context.
+	$download.delete
 }
 
 #
@@ -348,7 +350,7 @@ rf:Session.fetch() {
 rf:Session.monitor() {
 	local terminal sleep servers downloader jobsActive serversActive
 	local serversCount jobs job i line null file progress speed unit
-	local size full
+	local size full speedSum
 
 	terminal="$1"
 
@@ -370,18 +372,28 @@ rf:Session.monitor() {
 		$downloader.run
 		$servers.getStatus jobsActive serversActive serversCount jobs
 		$terminal.use $((1 + jobsActive))
-		$terminal.line 0 "Downloading: $jobsActive/$serversActive/$serversCount"
 		i=0
+		speedSum=0
 		for job in $jobs; do
 			i=$((i + 1))
 			$job.getStatus file size full null null progress speed
+			speedSum=$((speedSum + speed))
 			$terminal.convertBytes speed unit "$speed" 4
 			speed="$speed ${unit}b/s"
 			$terminal.convertBytes full unit "$full" 4
 			full="$full ${unit}b"
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
-			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "${file##*/}" "$size" "$full" "$progress" "$speed"
 			$terminal.line $i "$line"
+		done
+		$terminal.convertBytes speed unit "$speedSum" 4
+		speed="$speed ${unit}b/s"
+		$terminal.line 0 "Downloading: $jobsActive/$serversActive/$serversCount $speed"
+
+		$downloader.completedJobs jobs
+		for job in $jobs; do
+			$job.getTarget | $terminal.stdout
+			$job.delete
 		done
 		$sleep.run
 	done
