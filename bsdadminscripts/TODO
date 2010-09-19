@@ -13,4 +13,4 @@
 * Improve the documentation of -d
 * Imitate pkg_add's "-C, --chroot chrootdir" command, too bad -C is already in
   use
-
+* pkg_viper

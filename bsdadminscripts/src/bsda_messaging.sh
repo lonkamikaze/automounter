@@ -101,19 +101,25 @@ bsda:obj:createClass bsda:messaging:Lock \
 #	1 if the lock cannot be acquired.
 #
 bsda:messaging:Lock.init() {
+	local IFS
+	# Make sure $bsda_obj_interpreter is split into several fields.
+	IFS=' 	
+'
 	$this.setLock "$1"
-	lockf -ks "$1" $bsda_obj_interpreter -c "test -n \"\$(cat '$1' 2> /dev/null)\" || echo 0 > '$1'; chmod 0600 '$1'" || return 1
+	/usr/bin/lockf -ks "$1" $bsda_obj_interpreter -c "test -n \"\$(/bin/cat '$1' 2> /dev/null)\" || echo 0 > '$1'; /bin/chmod 0600 '$1'" || return 1
 }
 
 #
 # Remove the lock file. If it is safe to do so.
 #
 bsda:messaging:Lock.clean() {
-	local lock
+	local lock IFS
+	IFS=' 	
+'
 	$this.getLock lock
 
-	lockf -k "$lock" $bsda_obj_interpreter -c "
-		lock=\"\$(cat '$lock')\"
+	/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "
+		lock=\"\$(/bin/cat '$lock')\"
 		test \${lock:-0} -eq 0 && rm '$lock'
 	"
 }
@@ -125,14 +131,16 @@ bsda:messaging:Lock.clean() {
 # Reading may only be locked once .
 #
 bsda:messaging:Lock.lockRead() {
-	local lock
+	local lock IFS
+	IFS=' 	
+'
 	$this.getLock lock
 
 	# run until the lock is acquired.
 	while true; do
 		# Get a file system lock on the lock file.
-		lockf -k "$lock" $bsda_obj_interpreter -c "
-			lock=\"\$(cat '$lock')\"
+		/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "
+			lock=\"\$(/bin/cat '$lock')\"
 			if [ \${lock:-0} -eq 0 ]; then
 				echo -1 > '$lock'
 				exit 0
@@ -152,11 +160,13 @@ bsda:messaging:Lock.lockRead() {
 # is assumed.
 #
 bsda:messaging:Lock.unlockRead() {
-	local lock
+	local lock IFS
+	IFS=' 	
+'
 	$this.getLock lock
 
 	# Get a file system lock on the lock file.
-	lockf -k "$lock" $bsda_obj_interpreter -c "echo 0 > '$lock'" && return 0
+	/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "echo 0 > '$lock'"
 }
 
 #
@@ -168,15 +178,17 @@ bsda:messaging:Lock.unlockRead() {
 # is possible, again.
 #
 bsda:messaging:Lock.lockWrite() {
-	local lock
+	local lock IFS
+	IFS=' 	
+'
 	$this.getLock lock
 	locked=
 
 	# run until the lock is acquired.
 	while true; do
 		# Get a file system lock on the lock file.
-		lockf -k "$lock" $bsda_obj_interpreter -c "
-			lock=\"\$(cat '$lock')\"
+		/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "
+			lock=\"\$(/bin/cat '$lock')\"
 			if [ \${lock:-0} -ge 0 ]; then
 				echo \$((\${lock:-0} + 1)) > '$lock'
 				exit 0
@@ -197,11 +209,13 @@ bsda:messaging:Lock.lockWrite() {
 # is assumed.
 #
 bsda:messaging:Lock.unlockWrite() {
-	local lock
+	local lock IFS
+	IFS=' 	
+'
 	$this.getLock lock
 
 	# Get a file system lock on the lock file.
-	lockf -k "$lock" $bsda_obj_interpreter -c "echo \$((\$(cat '$lock') - 1)) > '$lock'"
+	/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "echo \$((\$(/bin/cat '$lock') - 1)) > '$lock'"
 }
 
 
@@ -231,7 +245,7 @@ bsda:obj:createClass bsda:messaging:FileSystemListener \
 #	1 if creating a locking object fails
 #
 bsda:messaging:FileSystemListener.init() {
-	lockf -ks "$1" chmod 0600 "$1" || return 1
+	/usr/bin/lockf -ks "$1" /bin/chmod 0600 "$1" || return 1
 	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
 	setvar ${this}queue "$1"
 	setvar ${this}position 0
@@ -373,7 +387,7 @@ bsda:obj:createClass bsda:messaging:FileSystemSender \
 #	1 if creating a locking object fails
 #
 bsda:messaging:FileSystemSender.init() {
-	lockf -ks "$1" chmod 0600 "$1" || return 1
+	/usr/bin/lockf -ks "$1" /bin/chmod 0600 "$1" || return 1
 	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
 	setvar ${this}queue "$1"
 }

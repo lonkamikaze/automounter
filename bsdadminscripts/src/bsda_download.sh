@@ -75,7 +75,7 @@ bsda:obj:createClass bsda:download:Manager \
 		"Called by the run method in the controller context." \
 	x:private:send \
 		"Sends data through the message queue." \
-	x:private:sendObject \
+	x:protected:sendObject \
 		"Sends an object through the message queue." \
 	x:protected:propagate \
 		"Propagates changes in the caller to the partner process." \
@@ -83,6 +83,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"Creates a job and dispatches it." \
 	x:public:term \
 		"Tell the background downloader to terminate." \
+	x:public:isActive \
+		"Reports whether the background downloader is still available." \
 
 
 #
@@ -126,9 +128,13 @@ bsda:download:Manager.downloader() {
 
 	# Create a scheduler for the jobs.
 	bsda:scheduler:RoundTripScheduler scheduler
+	$this.setScheduler $scheduler
+
+	# Make sure to die gracefully upon the usual signals.
+	trap "$scheduler.stop" sigint sigterm
 
 	# Create a sleeper job.
-	bsda:scheduler:Sleep sleeper 0.5
+	bsda:scheduler:Sleep sleeper 1
 
 	# Register initial jobs.
 	$scheduler.register $sleeper
@@ -140,7 +146,7 @@ bsda:download:Manager.downloader() {
 	# The scheduler has terminated, so clean up.
 	$this.getServers servers
 	$servers.delete 1
-	$this.getMesssenger messenger
+	$this.getMessenger messenger
 	$messenger.delete 1
 	$scheduler.delete
 	$sleeper.delete
@@ -158,7 +164,6 @@ bsda:download:Manager.run() {
 	local downloaderPID
 
 	$this.getDownloaderPID downloaderPID
-
 	if [ -z "$downloaderPID" ]; then
 		$this.runDownloader
 	else
@@ -174,7 +179,7 @@ bsda:download:Manager.run() {
 bsda:download:Manager.runController() {
 	local messenger lines count
 
-	$this.getMesssenger messenger
+	$this.getMessenger messenger
 	$messenger.receive lines count
 	eval "$lines"
 }
@@ -196,12 +201,12 @@ bsda:download:Manager.runDownloader() {
 	# Check whether the controlling process is still present, if one was
 	# specified.
 	$this.getControllerPID controllerPID
-	if [ -n "$controllerPID" ] && ! kill -0 "$controllerPID"; then
+	if [ -n "$controllerPID" ] && ! /bin/kill -0 "$controllerPID"; then
 		$scheduler.stop
 		return
 	fi
 
-	$this.getMesssenger messenger
+	$this.getMessenger messenger
 	$messenger.receive lines count
 	for line in $lines; do
 		# Deserialize objects or execute remote commands.
@@ -238,7 +243,7 @@ bsda:download:Manager.send() {
 	bsda:obj:isObject "${1##* }" && return 1
 
 	local messenger
-	$this.getMesssenger messenger
+	$this.getMessenger messenger
 
 	# Try to send the message.
 	while ! $messenger.send "$1"; do
@@ -263,7 +268,7 @@ bsda:download:Manager.sendObject() {
 	bsda:obj:isObject "$1" || return 1
 
 	local messenger serialized
-	$this.getMesssenger messenger
+	$this.getMessenger messenger
 	$1.serialize serialized
 
 	# Try to send the message.
@@ -273,6 +278,7 @@ bsda:download:Manager.sendObject() {
 		# Reserialize in case the object was changed.
 		$1.serialize serialized
 	done
+
 	return 0
 }
 
@@ -318,7 +324,22 @@ bsda:download:Manager.createJob() {
 # Terminate the background downloader.
 #
 bsda:download:Manager.term() {
-	$this.send '$scheduler.stop'
+	local downloaderPID
+	$this.getDownloaderPID downloaderPID
+	/bin/kill $downloaderPID 2> /dev/null
+	$this.setDownloaderPID
+}
+
+#
+# Checks whether the background downloader is still available.
+#
+# @return
+#	True (0) if the downloader is still present, else false (1).
+#
+bsda:download:Manager.isActive() {
+	local downloaderPID
+	$this.getDownloaderPID downloaderPID
+	/bin/kill -0 $downloaderPID 2> /dev/null || return 1
 }
 
 #
@@ -378,12 +399,17 @@ bsda:download:Server.init() {
 # files created by them.
 #
 bsda:download:Server.clean() {
-	local sender listener download
+	local IFS sender listener downloads
+
+	IFS='
+'
 
 	# Kill all downloads.
-	for download in $($this.getDownloads); do
-		kill -TERM $download
-	done
+	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
+	if [ -n "$downloads" ]; then
+		/bin/kill -TERM $downloads
+		$this.setDownloads
+	fi
 
 	# Delete sender and listener.
 	$this.getSender sender
@@ -438,21 +464,20 @@ bsda:download:Server.download() {
 		$job.getSource source
 		$job.getTarget target
 		$job.getSize size
-		fetch -qmS "$size" -o "$target" "$location/$source" > /dev/null 2>&1
+		time=$(/bin/date -u +%s)
+		$sender.send "action=start;job=$job;size=$size;time=$time;"
+		/usr/bin/fetch -qmS "$size" -o "$target" "$location/$source" > /dev/null 2>&1
 		result=$?
-		$sender.send "download=$$;job=$job;status=$result;size=$size"
+		time=$(/bin/date -u +%s)
+		$sender.send "action=end;job=$job;status=$result;time=$time;"
 	) &
 	# Append the new download.
-	downloads="${downloads:+$downloads$IFS}$!"
+	downloads="${downloads:+$downloads$IFS}$job:$!"
 	$this.setDownloads "$downloads"
 
 	# Update the amount of available download slots.
 	$this.getFree free
 	$this.setFree $((free - 1))
-
-	# Propagate changes to the controlling process.
-	$job.getManager manager
-	$manager.propagate
 }
 
 #
@@ -478,7 +503,7 @@ bsda:download:Server.getSize() {
 	$this.getLocation location
 
 	# Get the file size from this server.
-	size="$(fetch -s "$location/$source" 2> /dev/null)"
+	size="$(/usr/bin/fetch -s "$location/$source" 2> /dev/null)"
 
 	# Return the size.
 	$caller.setvar "$1" "$size"
@@ -490,9 +515,14 @@ bsda:download:Server.getSize() {
 # @param 1
 #	The name of the variable to store the number of currently active
 #	downloads in.
+# @param 2
+#	The running jobs.
 #
 bsda:download:Server.getStatus() {
-	$caller.setvar "$1" $(($($this.getDownloads downloads | wc -w)))
+	local downloads
+	$this.getDownloads downloads
+	$caller.setvar "$1" $(($(echo "$downloads" | /usr/bin/wc -w)))
+	$caller.setvar "$2" "$(echo "$downloads" | /usr/bin/sed 's/:.*//')"
 }
 
 #
@@ -502,7 +532,7 @@ bsda:download:Server.getStatus() {
 #
 bsda:download:Server.run() {
 	local message messages download job status downloads listener count
-	local IFS scheduler free size manager
+	local IFS scheduler free size manager action time
 
 	IFS='
 '
@@ -519,46 +549,63 @@ bsda:download:Server.run() {
 		return 0
 	fi
 
-	# Update the amount of free download slots.
-	$this.getFree free
-	free=$((free + count))
-	$this.setFree $free
+	# Get the scheduler.
+	$caller.getObject scheduler
 
+	# Go through all messages.
+	manager=
+	for message in $messages; do
+		# The message contains the action and other variables.
+		eval "$message"
+
+		case "$action" in
+		start)
+			# The message contained: job, time, size
+
+			# Update the job.
+			$job.setStartDownloadTime $time
+			$job.setEndDownloadTime
+			$job.setSize $size
+		;;
+		end)
+			# The message contained: job, time, status
+
+			# Update the job.
+			$job.setEndDownloadTime $time
+
+			# Update the amount of free download slots.
+			$this.getFree free
+			$this.setFree $((free + 1))
+
+			# Update the list of downloads.
+			downloads="$(echo "$downloads" | /usr/bin/grep -vF "$job:")"
+
+			# Store the update downloads list.
+			$this.setDownloads "$downloads"
+
+			# Notify the job.
+			if [ "$status" -eq "0" ]; then
+				$job.downloadSucceeded
+			else
+				$job.downloadFailed
+			fi
+		;;
+		esac
+
+		# Notify the controlling process of changes.
+		$job.getManager manager
+		$manager.sendObject $job
+		$manager.propagate
+	done
 
 	# Unregister from the scheduler if all downloads have been completed.
 	if [ -z "$downloads" ]; then
-		# Get the scheduler.
-		$caller.getObject scheduler
 		# Ceck whether this was called by a scheduler.
 		if bsda:scheduler:Scheduler.isInstance "$scheduler"; then
 			# Unregister from the scheduler.
 			$scheduler.unregister
 		fi
 	fi
-
-	# Go through all messages.
-	for message in $messages; do
-		# The message contains download, job, status and size.
-		eval "$message"
-
-		# Update the list of downloads.
-		downloads="$(echo "$downloads" | grep -vx "$download")"
-		$this.setDownloads "$downloads"
-
-		# Tell the download size to the job.
-		$job.setSize "$size"
-
-		# Notify the controlling process.
-		$job.getManager manager
-		$manager.propagate
-
-		# Notify the job.
-		if [ "$status" -eq "0" ]; then
-			$job.downloadSucceeded
-		else
-			$job.downloadFailed
-		fi
-	done
 }
 
 #
@@ -570,15 +617,12 @@ bsda:download:Server.stop() {
 	IFS='
 '
 
-	# Get the list of currently running downloads.
-	$this.getDownloads downloads
-
-	if [ -z "$downloads" ]; then
-		return 0
+	# Get the list of currently running downloads and kill them all.
+	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
+	if [ -n "$downloads" ]; then
+		/bin/kill -TERM $downloads
+		$this.setDownloads
 	fi
-
-	# Kill all downloads.
-	kill -TERM $downloads
 }
 
 
@@ -645,8 +689,14 @@ bsda:download:Servers.init() {
 bsda:download:Servers.clean() {
 	local IFS mirror
 
+	IFS='
+'
+
 	# Return if the servers are not to be deleted.
 	test -z "$1" && return 0
+
+	$this.getMaster mirror
+	$mirror.delete
 
 	for mirror in $($this.getMirrors); do
 		$mirror.delete
@@ -690,7 +740,7 @@ bsda:download:Servers.popMirror() {
 			# Return the mirror.
 			$caller.setvar "$1" "$mirror"
 			# Remove the returned mirror from the list.
-			mirrors="$(echo "$mirrors" | grep -vFx "$mirror")"
+			mirrors="$(echo "$mirrors" | /usr/bin/grep -vFx "$mirror")"
 			$this.setMirrors "$mirrors"
 			# Terminate.
 			return 0
@@ -712,16 +762,18 @@ bsda:download:Servers.popMirror() {
 #	The number of servers the downloads are distributed over.
 # @param &3
 #	The number of all servers.
+# @param &4
+#	The involved jobs, a list of Job instances.
 #
 bsda:download:Servers.getStatus() {
-	local IFS sum servers active mirrors mirror
+	local IFS sum servers active mirrors mirror jobs job
 
 	IFS='
 '
 
 	# Get the active master downloads.
 	$this.getMaster mirror
-	$mirror.getStatus sum
+	$mirror.getStatus sum jobs
 	servers=1
 	active=0
 	test $sum -gt 0 && active=1
@@ -730,7 +782,8 @@ bsda:download:Servers.getStatus() {
 	$this.getMirrors mirrors
 	for mirror in $mirrors; do
 		servers=$((servers + 1))
-		$mirror.getStatus mirror
+		$mirror.getStatus mirror job
+		jobs="${jobs:+$jobs${job:+$IFS}}$job"
 		sum=$((sum + mirror))
 		test $mirror -gt 0 && active=$((active + 1))
 	done
@@ -738,6 +791,7 @@ bsda:download:Servers.getStatus() {
 	$caller.setvar "$1" $sum
 	$caller.setvar "$2" $active
 	$caller.setvar "$3" $servers
+	$caller.setvar "$4" "$jobs"
 }
 
 #
@@ -758,9 +812,9 @@ bsda:obj:createClass bsda:download:Job \
 		"The local target location." \
 	w:protected:size \
 		"The download size." \
-	w:private:startDownloadTime \
+	w:protected:startDownloadTime \
 		"The time a download attempt started." \
-	w:private:endDownloadTime \
+	w:protected:endDownloadTime \
 		"The time a download attempt completed." \
 	w:private:servers \
 		"A Servers instance that is used as a queue for untried" \
@@ -830,12 +884,7 @@ bsda:download:Job.clean() {
 #
 # A getter for the file size.
 #
-# This overwrites the auto-generated getter method and it's actually a
-# performance hack. A background job normally requests it in
-# Server.download().
-# This download job will then send the value back to the server when
-# it completes and it gets collected by Server.run(), which will call
-# Job.setSize().
+# This overwrites the auto-generated getter method.
 #
 # @param 1
 #	The variable to return the size to.
@@ -844,7 +893,7 @@ bsda:download:Job.getSize() {
 	local size servers master
 
 	# Get the size.
-	$this.getSize size
+	bsda:obj:getVar size ${this}size
 	# Check whether the size is already known.
 	if [ -n "$size" ]; then
 		# Return the size.
@@ -873,7 +922,7 @@ bsda:download:Job.getSize() {
 # itself.
 #
 bsda:download:Job.run() {
-	local success scheduler servers mirror manager
+	local success scheduler servers mirror manager size
 
 	# Update the scheduler.
 	$caller.getObject scheduler
@@ -909,14 +958,9 @@ bsda:download:Job.run() {
 		# Unregister from the scheduler.
 		test -n "$scheduler" && $scheduler.unregister
 		# Start a download.
-		$this.setStartDownloadTime $(date -u +%s)
 		$mirror.download
 		# Register the download to the scheduler.
 		test -n "$scheduler" && $scheduler.register $mirror
-
-		# Propagate the changed state to the controlling process.
-		$this.getManager manager
-		$manager.propagate
 	fi
 }
 
@@ -934,9 +978,6 @@ bsda:download:Job.stop() {
 bsda:download:Job.downloadSucceeded() {
 	local servers manager
 
-	# Record the end of this download.
-	$this.setEndDownloadTime $(date -u +%s)
-
 	# Delete the list of servers.
 	$this.getServers servers
 	$servers.delete
@@ -944,10 +985,6 @@ bsda:download:Job.downloadSucceeded() {
 
 	# Store the success of this job.
 	$this.setSuccess 0
-
-	# Propagate the changed state to the controlling process.
-	$this.getManager manager
-	$manager.propagate
 }
 
 #
@@ -961,9 +998,6 @@ bsda:download:Job.downloadSucceeded() {
 #
 bsda:download:Job.downloadFailed() {
 	local servers mirror master scheduler manager
-
-	# Forget the last download attempt.
-	$this.setStartDownloadTime
 
 	# Get the mirror and the master server.
 	$caller.getObject mirror
@@ -984,10 +1018,6 @@ bsda:download:Job.downloadFailed() {
 		$this.getScheduler scheduler
 		bsda:scheduler:Scheduler.isInstance "$scheduler" && $scheduler.register
 	fi
-
-	# Propagate the changed state to the controlling process.
-	$this.getManager manager
-	$manager.propagate
 }
 
 #
@@ -1044,9 +1074,6 @@ bsda:download:Job.getStatus() {
 	$this.getEndDownloadTime end
 	$this.getTarget target
 
-	test -n "$start" -a -z "$end"
-	return $?
-
 	#
 	# Two cases the download is in progress/completed or has not yet
 	# started.
@@ -1062,7 +1089,7 @@ bsda:download:Job.getStatus() {
 		# The download has not yet completed, so we use NOW to
 		# calculate progress and speed.
 		if [ -z "$end" ]; then
-			end=$(date -u +%s)
+			end=$(/bin/date -u +%s)
 		fi
 
 		# The time passed in seconds, at least 1.
@@ -1079,6 +1106,7 @@ bsda:download:Job.getStatus() {
 		predict=$(((passed * size / realsize - passed) * 11 / 10))
 	else
 		# No progress.
+		realsize=0
 		passed=0
 		progress=0
 		speed=0

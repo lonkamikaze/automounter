@@ -27,7 +27,7 @@ test -n "$bsda_scheduler" && return 0
 bsda_scheduler=1
 
 # Include framework for object oriented shell scripting.
-. bsda_obj.sh
+. ${bsda_dir:-.}/bsda_obj.sh
 
 #
 # Offers classes and interfaces for a primitive scheduler.
@@ -133,34 +133,44 @@ bsda:scheduler:Sleep.stop() {
 #
 bsda:obj:createClass bsda:scheduler:RoundTripScheduler \
 	implements:bsda:scheduler:Scheduler \
-	-:running \
+	r:private:running \
 		"The state of the scheduler." \
-	r:processes \
+	r:private:processes \
 		"The list of processes." \
-	r:protectedProcesses \
+	r:private:protectedProcesses \
 		"A list of self registered processes."
 
 #
 # Registers a process. If no process is given, the caller is registered.
-# Processes registered in this way can only be unregister themselves.
+# Processes registered in this way can only unregister themselves.
+#
+# Every job can only be registered once.
 #
 # @param 1
 #	An instance of bsda:scheduler:Process, if not given the calling
 #	object is registered.
 # @return
-#	0 if everything goes fine
+#	0 if everything goes fine or the process is already registered
 #	1 if the given object is not a process
 #
 bsda:scheduler:RoundTripScheduler.register() {
-	local IFS
+	local IFS protectedProcesses processes
 
 	IFS='
 '
+
+	# Get the list of processes.
+	$this.getProtectedProcesses protectedProcesses
+	$this.getProcesses processes
+	processes="$protectedProcesses${protectedProcesses:+${processes:+$IFS}}$processes"
 
 	# Check whether a parameter was given.
 	if [ -n "$1" ]; then
 		# Only accept processes.
 		bsda:scheduler:Process.isInstance "$1" || return
+
+		# Skip already registered processes.
+		echo "$processes" | /usr/bin/grep -qFx "$1" && return
 
 		# Add process to the schedule.
 		eval "${this}processes=\"\${${this}processes:+\${${this}processes}$IFS}$1\""
@@ -172,9 +182,13 @@ bsda:scheduler:RoundTripScheduler.register() {
 		# Only accept processes.
 		bsda:scheduler:Process.isInstance "$process" || return
 
+		# Skip already registered processes.
+		echo "$processes" | /usr/bin/grep -qFx "$process" && return
+
 		# Add the process to the schedule.
 		eval "${this}protectedProcesses=\"\${${this}protectedProcesses:+\${${this}protectedProcesses}$IFS}$process\""
 	fi
+	return 0
 }
 
 #
@@ -203,12 +217,12 @@ bsda:scheduler:RoundTripScheduler.unregister() {
 	bsda:scheduler:Process.isInstance "$process" || return 1
 
 	# Check whether the process is registered.
-	if $this.getProcesses | grep -qFx "$process"; then
-		setvar ${this}processes "$($this.getProcesses | grep -vFx "$process")"
-	elif $this.getProtectedProcesses | grep -qFx "$process"; then
+	if $this.getProcesses | /usr/bin/grep -qFx "$process"; then
+		setvar ${this}processes "$($this.getProcesses | /usr/bin/grep -vFx "$process")"
+	elif $this.getProtectedProcesses | /usr/bin/grep -qFx "$process"; then
 		# Check whether the caller may unregister the process.
 		test "$($caller.getObject)" = "$process" || return 3
-		setvar ${this}protectedProcesses "$($this.getProtectedProcesses | grep -vFx "$process")"
+		setvar ${this}protectedProcesses "$($this.getProtectedProcesses | /usr/bin/grep -vFx "$process")"
 	else
 		# The process is not registered.
 		return 2

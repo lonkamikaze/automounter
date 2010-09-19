@@ -45,6 +45,9 @@ bsda_tty=1
 #	screen
 #	xterm-color
 #
+# Known bugs:
+#	Spaces at the beginning of status lines get lost upon redraw.
+#
 
 #
 # A list of useful termcap(5) capabilities, used with tput(1):
@@ -95,6 +98,8 @@ bsda:obj:createClass bsda:tty:Library \
 		"terminal space." \
 	x:public:convertBytes \
 		"Provides byte count representations." \
+	x:public:convertBytesToUnit \
+		"Provides byte count representations with a fixed unit." \
 
 #
 # Convert byte counts into human readable values.
@@ -121,7 +126,7 @@ bsda:tty:Library.convertBytes() {
 	scale=0
 	# Decimal scaling mutiplier.
 	decscale=1
-	for unit in b k m g t p; do
+	for unit in ' ' k m g t p; do
 		test ${#value} -le $width && break
 		# Record scaling factors to calculate the rest.
 		scale=$((scale + 10))
@@ -139,13 +144,65 @@ bsda:tty:Library.convertBytes() {
 		value="$value."
 		while [ ${#value} -lt $width ]; do
 			value="$value${rest%%${rest#?}}"
-			rest="${rest#?}"
+			# Discard the first digit, fill from the right with 0.
+			rest="${rest#?}0"
 		done
 	fi
 
 	# Return results.
 	$caller.setvar "$1" "$value"
 	$caller.setvar "$2" "$unit"
+}
+
+#
+# Convert byte counts into a specified representation.
+#
+# @param 1
+#	The variable to return the converted byte in.
+# @param 2
+#	The conversion unit either ' ', 'k', 'm', 'g', 't', 'p'.
+# @param 3
+#	The value to convert.
+# @param 4
+#	The optional targeted maximum string length. A length below 3 leads
+#	to 0 values between 1000 and 1024 of the underlying unit,
+#	the default length is 4.
+#
+bsda:tty:Library.convertBytesToUnit() {
+	local width targetUnit unit value scale decscale rest
+	targetUnit="$2"
+	width=${4:-4}
+	value="$(($3))"
+
+	# Binary scaling factor as powers of 2.
+	scale=0
+	# Decimal scaling mutiplier.
+	decscale=1
+	for unit in ' ' k m g t p; do
+		test "$targetUnit" = "$unit" && break
+		# Record scaling factors to calculate the rest.
+		scale=$((scale + 10))
+		decscale=$((decscale * 1000))
+		# Convert the value to the next unit.
+		value=$((value >> 10))
+	done
+
+	# Get the remainder out of the original value and scale it to a
+	# decimal representation.
+	rest=$((($3 - (value << scale)) * decscale / (1 << scale)))
+
+	# Pad the value with digits.
+	if [ $((${#value} + 1)) -lt $width ]; then
+		value="$value."
+		while [ ${#value} -lt $width ]; do
+			value="$value${rest%%${rest#?}}"
+			# Discard the first digit, fill from the right with 0.
+			rest="${rest#?}0"
+		done
+	fi
+
+	# Return results.
+	$caller.setvar "$1" "$value"
 }
 
 #
@@ -222,7 +279,7 @@ bsda:tty:Library.format() {
 	printf="$pattern"
 	# Sum up the length of dynamically spaced arguments.
 	xlen=0
-	for format in $(echo "$pattern" | egrep -o '<[0-]?([[:digit:]]*|x)-?:[[:alpha:]]>'); do
+	for format in $(echo "$pattern" | /usr/bin/egrep -o '<[0-]?([[:digit:]]*|x)-?:[[:alpha:]]>'); do
 		# Get the formatting values
 		style="${format##*:}";style="${style%>}"
 		width="${format#<}";width="${width#[0-]}";width="${width%%:*}";width="${width%-}"
@@ -278,7 +335,7 @@ bsda:tty:Library.format() {
 	elif [ $adjust -ne 0 ];  then
 		# Pad/shrink arguments.
 		printf="$pattern"
-		for format in $(echo "$pattern" | egrep -o '<[0-]?([[:digit:]]*|x)-?:[[:alpha:]]>'); do
+		for format in $(echo "$pattern" | /usr/bin/egrep -o '<[0-]?([[:digit:]]*|x)-?:[[:alpha:]]>'); do
 			arg="$1"
 			shift
 			# Get the values
@@ -569,6 +626,9 @@ bsda:tty:Terminal.use() {
 			providers="$providers$IFS"
 			buffer="$buffer$IFS"
 		done
+	else
+		# Nothing to change.
+		return 0
 	fi
 
 	# Record the new buffer and provider list, redraw if necessary.
@@ -644,7 +704,7 @@ bsda:tty:Terminal.refresh() {
 	sedcmd=
 	if [ $# -eq 0 ]; then
 		# Get the available providers and indexes.
-		for provider in $($this.getProviders | grep -nvx ''); do
+		for provider in $($this.getProviders | /usr/bin/grep -nvx ''); do
 			index="${provider%%:*}"
 			provider="${provider#*:}"
 
@@ -658,7 +718,7 @@ bsda:tty:Terminal.refresh() {
 			if bsda:tty:StatusProvider.isInstance "$provider"; then
 				# A provider was given find the index number
 				# (counting from 1).
-				index="$(echo "$providers" | grep -nFx "$provider")"
+				index="$(echo "$providers" | /usr/bin/grep -nFx "$provider")"
 
 				if [ -z "$index" ]; then
 					bsda_tty_errno=$bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
@@ -833,7 +893,7 @@ bsda:tty:Terminal.detach() {
 		# The given parameter is a provider.
 
 		# Check whether the provider is attached.
-		if ! echo "$providers" | grep -qFx "$provider"; then
+		if ! echo "$providers" | /usr/bin/grep -qFx "$provider"; then
 			bsda_tty_errno=$bsda_tty_ERR_TERMINAL_STATUSPROVIDER_NOT_IN_LIST
 			return 1
 		fi
@@ -845,8 +905,8 @@ bsda:tty:Terminal.detach() {
 		# The grep command provides line numbers and the sed command
 		# produces a line replacing sed command.
 		sedcmd="$(
-			echo "$providers" | grep -Fxn "$provider" \
-				| sed "s/:.*/g/"
+			echo "$providers" | /usr/bin/grep -Fxn "$provider" \
+				| /usr/bin/sed "s/:.*/g/"
 		)"
 
 		# Empty the affected lines in the providers list.
@@ -965,7 +1025,7 @@ bsda:tty:Terminal.line() {
 # on the terminal unless the output was too long to display on the terminal in
 # one chunk.
 #
-# Multibyte characters might break this, it depends on awk(1).
+# Double wide multibyte characters might break this.
 #
 # @param @
 #	The text to output.
@@ -994,6 +1054,7 @@ bsda:tty:Terminal.stdout() {
 	#
 	# Get all the stuff needed to know for output duplication.
 	#
+	maxli=0
 	if [ -n "$active" ]; then
 		# Get the maximum lines and columns from the terminal.
 		maxli=$(tput li 2> /dev/tty || echo 24)
@@ -1016,7 +1077,7 @@ bsda:tty:Terminal.stdout() {
 	# The return value.
 	status=0
 	# Only perform all that fancy stuff in visible mode.
-	if [ -n "$visible" -a $maxli -gt 1 ]; then
+	if [ -n "$active" -a -n "$visible" -a $maxli -gt 1 ]; then
 		# Get the number of status lines to display and acquire them
 		# from the buffer.
 		$this.getDisplayBuffer buffer count
