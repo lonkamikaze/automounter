@@ -64,6 +64,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"background download manager." \
 	w:private:downloaderPID \
 		"The PID of the background downloading process." \
+	w:private:completedJobs \
+		"A list of recently completed jobs." \
 	i:private:init \
 		"The constructor." \
 	x:private:downloader \
@@ -81,6 +83,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"Propagates changes in the caller to the partner process." \
 	x:public:createJob \
 		"Creates a job and dispatches it." \
+	x:public:completedJobs \
+		"Get newly completed jobs." \
 	x:public:term \
 		"Tell the background downloader to terminate." \
 	x:public:isActive \
@@ -177,11 +181,32 @@ bsda:download:Manager.run() {
 # Flushes the message queue, i.e. update all Jobs.
 #
 bsda:download:Manager.runController() {
-	local messenger lines count
+	local IFS messenger lines count line object jobs
 
 	$this.getMessenger messenger
 	$messenger.receive lines count
-	eval "$lines"
+
+	# Nothing returned, skip the rest.
+	if [ -z "$count" ]; then
+		return 0
+	fi
+
+	IFS='
+'
+
+	$this.getCompletedJobs jobs
+	for line in $lines; do
+		# Deserialize objects.
+		bsda:obj:deserialize object "$line"
+
+		# Remember completed jobs.
+		if bsda:download:Job.isInstance "$object"; then
+			if $object.hasCompleted; then
+				jobs="${jobs:+$jobs$IFS}$object"
+			fi
+		fi
+	done
+	$this.setCompletedJobs "$jobs"
 }
 
 #
@@ -215,7 +240,6 @@ bsda:download:Manager.runDownloader() {
 		# Queue jobs.
 		if bsda:download:Job.isInstance "$object"; then
 			$scheduler.register "$object"
-			continue
 		fi
 	done
 }
@@ -318,6 +342,25 @@ bsda:download:Manager.createJob() {
 	# Dispatch the job.
 	$this.sendObject $servers
 	$this.sendObject $job
+}
+
+#
+# Returns the recently completed jobs.
+#
+# Every completed job will only be returned once.
+#
+# @param &1
+#	The name of the variable to hold the commpleted jobs.
+# @return
+#	Returns true (0) if there were any completed jobs,
+#	false (1) otherwise.
+#
+bsda:download:Manager.completedJobs() {
+	local jobs
+	$this.getCompletedJobs jobs
+	$this.setCompletedJobs
+	$caller.setvar "$1" "$jobs"
+	test -n "$jobs"
 }
 
 #
@@ -596,6 +639,12 @@ bsda:download:Server.run() {
 		$job.getManager manager
 		$manager.sendObject $job
 		$manager.propagate
+
+		# If a job has completed it is no longer required in the
+		# downloader context.
+		if $job.hasCompleted; then
+			$job.delete
+		fi
 	done
 
 	# Unregister from the scheduler if all downloads have been completed.
