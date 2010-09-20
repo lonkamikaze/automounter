@@ -502,11 +502,16 @@ bsda:download:Server.download() {
 	# The following block gets forked away, so nothing has to be declared
 	# local.
 	(
+		# Don't let fetch block signals.
+		set -T
+		trap 'kill $(jobs -s) 2> /dev/null; exit 1' sigint sigterm
 		$this.getSender sender
 		$this.getLocation location
 		$job.getSource source
 		$job.getTarget target
-		$job.getSize size
+		if ! $job.getSize size; then
+			$sender.send "action=end;job=$job;status=1;time=;"
+		fi
 		time=$(/bin/date -u +%s)
 		$sender.send "action=start;job=$job;size=$size;time=$time;"
 		/usr/bin/fetch -qmS "$size" -o "$target" "$location/$source" > /dev/null 2>&1
@@ -526,11 +531,12 @@ bsda:download:Server.download() {
 #
 # Returns the size of the file on the server seeked by the calling job.
 #
-# @param 1
+# @param &1
 #	The name of the variable to return the size to.
 # @return
 #	0 if everything goes fine
 #	1 if the caller is not a job.
+#	2 if the size was not acquired
 #
 bsda:download:Server.getSize() {
 	local size job source location
@@ -546,7 +552,18 @@ bsda:download:Server.getSize() {
 	$this.getLocation location
 
 	# Get the file size from this server.
-	size="$(/usr/bin/fetch -s "$location/$source" 2> /dev/null)"
+	if ! size="$(/usr/bin/fetch -s "$location/$source" 2> /dev/null)"; then
+		if ! size="$(/usr/bin/fetch -s "$location/$source" 2> /dev/null)"; then
+			$caller.setvar "$1"
+			return 2
+		fi
+	fi
+
+	# Unknown size is not supported.
+	if [ "$size" = "Unknown" ]; then
+		$caller.setvar "$1"
+		return 2
+	fi
 
 	# Return the size.
 	$caller.setvar "$1" "$size"
@@ -935,8 +952,10 @@ bsda:download:Job.clean() {
 #
 # This overwrites the auto-generated getter method.
 #
-# @param 1
+# @param &1
 #	The variable to return the size to.
+# @return
+#	Returns true (0) if the size is returned, false (1) otherwise.
 #
 bsda:download:Job.getSize() {
 	local size servers master
@@ -953,13 +972,18 @@ bsda:download:Job.getSize() {
 	# The size is not yet known, so acquire it.
 	$this.getServers servers
 	$servers.getMaster master
-	$master.getSize size
+	if ! $master.getSize size; then
+		$caller.setvar "$1"
+		return 1
+	fi
+		
 
 	# Store the size.
 	setvar ${this}size "$size"
 
 	# Return the size.
 	$caller.setvar "$1" "$size"
+	return 0
 }
 
 #
