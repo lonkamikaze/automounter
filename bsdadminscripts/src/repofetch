@@ -60,6 +60,8 @@ readonly rf_session_dir="$HOME/.repofetch"
 # @return
 #	True (0) if the session exists, else false (1).
 rf_session_exists() {
+	test -n "$rf_session_name" || return
+
 	rf_session_file="$rf_session_name"
 	if [ "$rf_session_name" = "${rf_session_name##*/}" ]; then
 		rf_session_file="$rf_session_dir/$rf_session_file"
@@ -170,7 +172,7 @@ rf_init() {
 	return
 }
 
-rf_stop() {
+rf_term() {
 	if ! rf_session_exists; then
 		$rf_terminal.stderr "ERROR: The session '$rf_session_name' does not exist!"
 		return $rf_ERR_PARAM_SESSION_UNKNOWN
@@ -178,10 +180,6 @@ rf_stop() {
 
 	rf_session_read
 	$rf_session.term
-}
-
-rf_term() {
-	rf_stop || return
 	rf_session_delete
 }
 
@@ -260,6 +258,7 @@ rf_monitor() {
 }
 
 rf_sessions() {
+	/bin/ls "$rf_session_dir"
 }
 
 
@@ -348,9 +347,9 @@ rf:Session.fetch() {
 #	The interval to update information.
 # 
 rf:Session.monitor() {
-	local terminal sleep servers downloader jobsActive serversActive
-	local serversCount jobs job i line null file progress speed unit
-	local size full speedSum
+	local terminal sleep servers downloader jobsActive plural
+	local serversCount jobs job line null file progress speed unit
+	local size full speedSum displayJob
 
 	terminal="$1"
 
@@ -368,31 +367,62 @@ rf:Session.monitor() {
 	$this.getServers servers
 
 	# Start monitoring loop.
+	$terminal.use 2
+	displayJob=
 	while $downloader.isActive && [ -n "$($this.getMonitoring)" ]; do
+		# Synchronize with the manager.
 		$downloader.run
-		$servers.getStatus jobsActive serversActive serversCount jobs
-		$terminal.use $((1 + jobsActive))
-		i=0
+		# Get a summary from the servers.
+		$servers.getStatus jobsActive null serversCount jobs
+
+		# Accumulate speed of all downloads in progress.
 		speedSum=0
 		for job in $jobs; do
-			i=$((i + 1))
-			$job.getStatus file size full null null progress speed
+			# Pick one job to be displayed.
+			if [ -z "$displayJob" ]; then
+				displayJob=$job
+			fi
+			$job.getStatus null null null null null null speed
 			speedSum=$((speedSum + speed))
+		done
+		$terminal.convertBytes speedSum unit "$speedSum" 4
+		speedSum="$speedSum ${unit}b/s"
+
+		# Display one job's progress. Displaying them all gets too
+		# annoying.
+		if [ -n "$displayJob" ]; then
+			$displayJob.getStatus file size full null null progress speed
 			$terminal.convertBytes speed unit "$speed" 4
 			speed="$speed ${unit}b/s"
 			$terminal.convertBytes full unit "$full" 4
 			full="$full ${unit}b"
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
 			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "${file##*/}" "$size" "$full" "$progress" "$speed"
-			$terminal.line $i "$line"
-		done
-		$terminal.convertBytes speed unit "$speedSum" 4
-		speed="$speed ${unit}b/s"
-		$terminal.line 0 "Downloading: $jobsActive/$serversActive/$serversCount $speed"
+			$terminal.line 1 "$line"
+		fi
 
+		# show the summary.
+		plural=
+		test $jobsActive -ne 1 && plural=s
+		$terminal.format line "Downloading <${#serversCount}:d> file<-x:s> at <9:s>" "$jobsActive" "s" "$speedSum"
+		$terminal.line 0 "$line"
+
+		# Get the completed jobs, display them and forget them.
 		$downloader.completedJobs jobs
 		for job in $jobs; do
-			$job.getTarget | $terminal.stdout
+			# Output the completed job.
+			$job.getTarget file
+			if $job.hasSucceeded; then
+				$terminal.stdout "DONE: $file"
+			else
+				$terminal.stdout "FAIL: $file"
+			fi
+			# Because completed jobs are deleted, they should
+			# better not be displayed.
+			if [ "$job" = "$displayJob" ]; then
+				displayJob=
+			fi
+			# Forget about the job.
 			$job.delete
 		done
 		$sleep.run
@@ -404,8 +434,8 @@ rf:Session.monitor() {
 # The second parameter represents the action to perform.
 #
 
-rf_session_name="$1"
-rf_command="$2"
+rf_session_name="$2"
+rf_command="$1"
 shift 2
 
 # We need a terminal for error output. It'll be thrown away should this
@@ -414,8 +444,6 @@ bsda:tty:Terminal rf_terminal
 
 # Check for a valid session command.
 readonly rf_session_commands="init
-stop
-resurrect
 term
 fetch
 monitor
