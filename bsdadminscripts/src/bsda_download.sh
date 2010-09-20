@@ -55,6 +55,8 @@ bsda:obj:createClass bsda:download:Manager \
 	implements:bsda:scheduler:Process \
 	w:private:scheduler \
 		"An instance of bsda:scheduler:Scheduler." \
+	w:private:jobQueue \
+		"An instance of bsda:scheduler:ProcessQueue." \
 	w:private:servers \
 		"The servers to work with." \
 	w:private:messenger \
@@ -128,11 +130,13 @@ bsda:download:Manager.init() {
 # Once the downloader 
 #
 bsda:download:Manager.downloader() {
-	local scheduler sleeper servers messenger
+	local scheduler sleeper servers messenger jobQueue
 
 	# Create a scheduler for the jobs.
 	bsda:scheduler:RoundTripScheduler scheduler
 	$this.setScheduler $scheduler
+	bsda:scheduler:ProcessQueue jobs
+	$this.setJobQueue $jobs
 
 	# Make sure to die gracefully upon the usual signals.
 	trap "$scheduler.stop" sigint sigterm
@@ -143,6 +147,10 @@ bsda:download:Manager.downloader() {
 	# Register initial jobs.
 	$scheduler.register $sleeper
 	$scheduler.register $this
+	$scheduler.register $jobs
+
+	# Tell the servers about the scheduler.
+	$servers.setScheduler $scheduler
 
 	# Cede control to the scheduler.
 	$scheduler.run
@@ -218,6 +226,7 @@ bsda:download:Manager.runController() {
 #
 bsda:download:Manager.runDownloader() {
 	local IFS messenger line lines count object scheduler controllerPID
+	local jobQueue
 
 	IFS='
 '
@@ -233,13 +242,15 @@ bsda:download:Manager.runDownloader() {
 
 	$this.getMessenger messenger
 	$messenger.receive lines count
+	$this.getJobQueue jobQueue
 	for line in $lines; do
 		# Deserialize objects or execute remote commands.
 		bsda:obj:deserialize object "$line"
 
 		# Queue jobs.
 		if bsda:download:Job.isInstance "$object"; then
-			$scheduler.register "$object"
+			$object.setScheduler $jobQueue
+			$jobQueue.register "$object"
 		fi
 	done
 }
@@ -399,6 +410,9 @@ bsda:obj:createClass bsda:download:Server \
 		"A message queue listener to communicate with downloads." \
 	w:private:sender \
 		"A message queue sender for the downloads." \
+	w:private:scheduler \
+	x:protected:setScheduler \
+		"A bsda:scheduler:Scheduler instance." \
 	w:private:downloads \
 		"A list of the currently running downloads." \
 	i:private:init \
@@ -486,7 +500,7 @@ bsda:download:Server.isAvailable() {
 #	3 for a failed download
 #
 bsda:download:Server.download() {
-	local job downloads IFS free manager
+	local job downloads IFS free manager scheduler
 	IFS='
 '
 
@@ -495,6 +509,10 @@ bsda:download:Server.download() {
 	bsda:download:Job.isInstance "$job" || return 1
 	# Quit if the server is not available.
 	$this.isAvailable || return 2
+
+	# Register at the scheduler.
+	$this.getScheduler scheduler
+	$scheduler.register
 
 	# Get the list of currently running downloads.
 	$this.getDownloads downloads
@@ -526,6 +544,8 @@ bsda:download:Server.download() {
 	# Update the amount of available download slots.
 	$this.getFree free
 	$this.setFree $((free - 1))
+
+	return 0
 }
 
 #
@@ -570,7 +590,7 @@ bsda:download:Server.getSize() {
 }
 
 #
-# Returns the number of active downloads.
+# Returns the number of active downloads and the jobs.
 #
 # @param 1
 #	The name of the variable to store the number of currently active
@@ -610,7 +630,7 @@ bsda:download:Server.run() {
 	fi
 
 	# Get the scheduler.
-	$caller.getObject scheduler
+	$this.getScheduler scheduler
 
 	# Go through all messages.
 	manager=
@@ -666,11 +686,8 @@ bsda:download:Server.run() {
 
 	# Unregister from the scheduler if all downloads have been completed.
 	if [ -z "$downloads" ]; then
-		# Ceck whether this was called by a scheduler.
-		if bsda:scheduler:Scheduler.isInstance "$scheduler"; then
-			# Unregister from the scheduler.
-			$scheduler.unregister
-		fi
+		# Unregister from the scheduler.
+		$scheduler.unregister
 	fi
 }
 
@@ -686,7 +703,7 @@ bsda:download:Server.stop() {
 	# Get the list of currently running downloads and kill them all.
 	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
 	if [ -n "$downloads" ]; then
-		/bin/kill -TERM $downloads
+		/bin/kill $downloads
 		$this.setDownloads
 	fi
 }
@@ -710,6 +727,8 @@ bsda:obj:createClass bsda:download:Servers \
 		"The constructor." \
 	c:private:clean \
 		"The destructor." \
+	x:protected:setScheduler \
+		"Forward a bsda:scheduler:Scheduler instance to all servers." \
 	x:public:getStatus \
 		"Returns the number of active downloads." \
 
@@ -819,6 +838,35 @@ bsda:download:Servers.popMirror() {
 }
 
 #
+# Forwards a scheduler to every server object.
+#
+# @param 1
+#	The scheduler to forward.
+# @return
+#	Returns false (1) if the given parameter is not a scheduler,
+#	else true (0).
+#
+bsda:download:Servers.setScheduler() {
+	local IFS mirror
+
+	IFS='
+'
+
+	# Only forward schedulers.
+	if ! bsda:scheduler:Scheduler.isInstance "$1"; then
+		return 1
+	fi
+
+	$this.getMaster mirror
+	$mirror.setScheduler "$1"
+
+	for mirror in $($this.getMirrors); do
+		$mirror.setScheduler "$1"
+	done
+	return 0
+}
+
+#
 # Returns the sum of active downloads over all servers.
 #
 # @param &1
@@ -868,6 +916,7 @@ bsda:obj:createClass bsda:download:Job \
 	w:private:success \
 		"Whether the job was successfully completed." \
 	w:private:scheduler \
+	x:protected:setScheduler \
 		"A bsda:scheduler:Scheduler instance." \
 	w:private:source \
 		"The download source file name." \
@@ -997,18 +1046,11 @@ bsda:download:Job.getSize() {
 bsda:download:Job.run() {
 	local success scheduler servers mirror manager size
 
-	# Update the scheduler.
-	$caller.getObject scheduler
-	if bsda:scheduler:Scheduler.isInstance "$scheduler"; then
-		$this.setScheduler $scheduler
-	else
-		scheduler=
-	fi
+	$this.getScheduler scheduler
 
 	# If we already completed immediately unregister.
-	$this.getSuccess success
-	if [ -n "$success" ]; then
-		test -n "$scheduler" && $scheduler.unregister
+	if $this.hasCompleted; then
+		$scheduler.unregister
 		return
 	fi
 
@@ -1028,12 +1070,11 @@ bsda:download:Job.run() {
 
 	# If a mirror is available, dispatch a download.
 	if [ -n "$mirror" ]; then
-		# Unregister from the scheduler.
-		test -n "$scheduler" && $scheduler.unregister
 		# Start a download.
-		$mirror.download
-		# Register the download to the scheduler.
-		test -n "$scheduler" && $scheduler.register $mirror
+		if $mirror.download; then
+			# Unregister from the scheduler.
+			$scheduler.unregister
+		fi
 	fi
 }
 
@@ -1089,7 +1130,7 @@ bsda:download:Job.downloadFailed() {
 	else
 		# Reregister at the scheduler.
 		$this.getScheduler scheduler
-		bsda:scheduler:Scheduler.isInstance "$scheduler" && $scheduler.register
+		$scheduler.register
 	fi
 }
 

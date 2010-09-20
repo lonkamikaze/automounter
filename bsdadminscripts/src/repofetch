@@ -377,6 +377,7 @@ rf:Session.monitor() {
 
 		# Accumulate speed of all downloads in progress.
 		speedSum=0
+		displayJob="$(echo "$jobs" | grep -Fx "$displayJob")"
 		for job in $jobs; do
 			# Pick one job to be displayed.
 			if [ -z "$displayJob" ]; then
@@ -390,6 +391,7 @@ rf:Session.monitor() {
 
 		# Display one job's progress. Displaying them all gets too
 		# annoying.
+		line=
 		if [ -n "$displayJob" ]; then
 			$displayJob.getStatus file size full null null progress speed
 			$terminal.convertBytes speed unit "$speed" 4
@@ -398,8 +400,8 @@ rf:Session.monitor() {
 			full="$full ${unit}b"
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
 			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "${file##*/}" "$size" "$full" "$progress" "$speed"
-			$terminal.line 1 "$line"
 		fi
+		$terminal.line 1 "$line"
 
 		# show the summary.
 		plural=
