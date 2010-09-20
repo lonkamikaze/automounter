@@ -296,16 +296,18 @@ bsda:scheduler:ProcessQueue.run() {
 	# is unset.
 	#
 	if [ -n "$processes" ]; then
-		# Call the first process.
-		process="${processes%%${IFS}*}"
-		$process.run
-
 		# Circle the process to the end of the queue if there are
 		# more than one.
+		process="${processes%%${IFS}*}"
 		if [ "$process" != "$processes" ]; then
 			# Update the list of processes.
 			$this.setProcesses "${processes#$process$IFS}$IFS$process"
 		fi
+
+		# Call the first process after the circling.
+		# Thus the process does not magically reappear if it
+		# unregisters.
+		$process.run
 	fi
 }
 
