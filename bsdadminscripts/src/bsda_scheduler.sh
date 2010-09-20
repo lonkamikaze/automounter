@@ -60,6 +60,7 @@ bsda:obj:createInterface bsda:scheduler:Process \
 # This interface has to be implemented by every scheduler.
 #
 bsda:obj:createInterface bsda:scheduler:Scheduler \
+	extends:bsda:scheduler:Process \
 	x:register \
 		"This method is called to register a processes." \
 	x:unregister \
@@ -135,14 +136,11 @@ bsda:obj:createClass bsda:scheduler:RoundTripScheduler \
 	implements:bsda:scheduler:Scheduler \
 	r:private:running \
 		"The state of the scheduler." \
-	r:private:processes \
-		"The list of processes." \
-	r:private:protectedProcesses \
-		"A list of self registered processes."
+	w:private:processes \
+		"The list of processes."
 
 #
 # Registers a process. If no process is given, the caller is registered.
-# Processes registered in this way can only unregister themselves.
 #
 # Every job can only be registered once.
 #
@@ -154,40 +152,30 @@ bsda:obj:createClass bsda:scheduler:RoundTripScheduler \
 #	1 if the given object is not a process
 #
 bsda:scheduler:RoundTripScheduler.register() {
-	local IFS protectedProcesses processes
+	local IFS processes process
 
 	IFS='
 '
 
 	# Get the list of processes.
-	$this.getProtectedProcesses protectedProcesses
 	$this.getProcesses processes
-	processes="$protectedProcesses${protectedProcesses:+${processes:+$IFS}}$processes"
 
 	# Check whether a parameter was given.
 	if [ -n "$1" ]; then
-		# Only accept processes.
-		bsda:scheduler:Process.isInstance "$1" || return
-
-		# Skip already registered processes.
-		echo "$processes" | /usr/bin/grep -qFx "$1" && return
-
-		# Add process to the schedule.
-		eval "${this}processes=\"\${${this}processes:+\${${this}processes}$IFS}$1\""
+		process="$1"
 	else
-		local process
 		# Get the caller.
 		$caller.getObject process
-
-		# Only accept processes.
-		bsda:scheduler:Process.isInstance "$process" || return
-
-		# Skip already registered processes.
-		echo "$processes" | /usr/bin/grep -qFx "$process" && return
-
-		# Add the process to the schedule.
-		eval "${this}protectedProcesses=\"\${${this}protectedProcesses:+\${${this}protectedProcesses}$IFS}$process\""
 	fi
+
+	# Only accept processes.
+	bsda:scheduler:Process.isInstance "$process" || return
+
+	# Skip already registered processes.
+	echo "$processes" | /usr/bin/grep -qFx "$process" && return
+
+	# Add process to the schedule.
+	$this.setProcesses "${processes:+$processes$IFS}$process"
 	return 0
 }
 
@@ -201,7 +189,6 @@ bsda:scheduler:RoundTripScheduler.register() {
 #	0 if everything goes fine
 #	1 if the given process is not a bsda:scheduler:Process instance
 #	2 if the given process is not registered 
-#	3 if the process may not be unregistered by the caller
 #
 bsda:scheduler:RoundTripScheduler.unregister() {
 	local process
@@ -219,10 +206,6 @@ bsda:scheduler:RoundTripScheduler.unregister() {
 	# Check whether the process is registered.
 	if $this.getProcesses | /usr/bin/grep -qFx "$process"; then
 		setvar ${this}processes "$($this.getProcesses | /usr/bin/grep -vFx "$process")"
-	elif $this.getProtectedProcesses | /usr/bin/grep -qFx "$process"; then
-		# Check whether the caller may unregister the process.
-		test "$($caller.getObject)" = "$process" || return 3
-		setvar ${this}protectedProcesses "$($this.getProtectedProcesses | /usr/bin/grep -vFx "$process")"
 	else
 		# The process is not registered.
 		return 2
@@ -235,15 +218,13 @@ bsda:scheduler:RoundTripScheduler.unregister() {
 # or until the scheduler is stopped.
 #
 bsda:scheduler:RoundTripScheduler.run() {
-	local process processes protectedProcesses running IFS
+	local process processes running IFS
 
 	IFS='
 '
 
 	# Get the list of processes.
-	$this.getProtectedProcesses protectedProcesses
 	$this.getProcesses processes
-	processes="$protectedProcesses${protectedProcesses:+${processes:+$IFS}}$processes"
 
 	# Get the running state.
 	setvar ${this}running 1
@@ -263,9 +244,7 @@ bsda:scheduler:RoundTripScheduler.run() {
 		}
 
 		# Update the list of processes.
-		$this.getProtectedProcesses protectedProcesses
 		$this.getProcesses processes
-		processes="$protectedProcesses${protectedProcesses:+${processes:+$IFS}}$processes"
 	done
 }
 
@@ -273,7 +252,7 @@ bsda:scheduler:RoundTripScheduler.run() {
 # Stop the scheduler and call the stop method of every registered process.
 #
 bsda:scheduler:RoundTripScheduler.stop() {
-	local process processes protectedProcesses IFS
+	local process processes IFS
 	IFS='
 '
 
@@ -281,14 +260,52 @@ bsda:scheduler:RoundTripScheduler.stop() {
 	unset ${this}running
 
 	# Get the list of processes.
-	$this.getProtectedProcesses protectedProcesses
 	$this.getProcesses processes
-	processes="$protectedProcesses${protectedProcesses:+${processes:+$IFS}}$processes"
 
 	# Call every process.
 	for process in $processes; {
 		# Stop the current process.
 		$process.stop
 	}
+}
+
+#
+# Instances of this class can be used as a container for serveral processes
+# in a scheduler.
+#
+# Every time this container is called, it will run only one of the contained
+# processes, cycling through them with every call.
+#
+bsda:obj:createClass bsda:scheduler:ProcessQueue \
+	extends:bsda:scheduler:RoundTripScheduler
+
+#
+# Runs a single job from the queue.
+#
+bsda:scheduler:ProcessQueue.run() {
+	local process processes IFS
+
+	IFS='
+'
+
+	# Get the list of processes.
+	$this.getProcesses processes
+
+	#
+	# Proceed until the list of processes is empty or the running state
+	# is unset.
+	#
+	if [ -n "$processes" ]; then
+		# Call the first process.
+		process="${processes%%${IFS}*}"
+		$process.run
+
+		# Circle the process to the end of the queue if there are
+		# more than one.
+		if [ "$process" != "$processes" ]; then
+			# Update the list of processes.
+			$this.setProcesses "${processes#$process$IFS}$IFS$process"
+		fi
+	fi
 }
 
