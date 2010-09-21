@@ -85,6 +85,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"Propagates changes in the caller to the partner process." \
 	x:public:createJob \
 		"Creates a job and dispatches it." \
+	x:public:createJobs \
+		"Creates a bunch of jobs and dispatches them." \
 	x:public:completedJobs \
 		"Get newly completed jobs." \
 	x:public:term \
@@ -274,9 +276,6 @@ bsda:download:Manager.stop() {
 #	0 if everything is in order.
 #
 bsda:download:Manager.send() {
-	# Check whether this is not an object.
-	bsda:obj:isObject "${1##* }" && return 1
-
 	local messenger
 	$this.getMessenger messenger
 
@@ -353,6 +352,56 @@ bsda:download:Manager.createJob() {
 	# Dispatch the job.
 	$this.sendObject $servers
 	$this.sendObject $job
+}
+
+#
+# Creates a bunch of new job and forwards them to the downloading process.
+#
+# This method is faster for a high number of downloads than the createJob()
+# method. The downturn is that its use is less convenient.
+#
+# @param 1
+#	The name of the variable to store the list of created jobs in.
+# @param @
+#	Theremaining parameters are expected to follow the pattern:
+#		<remote file> <local file> ...
+#
+bsda:download:Manager.createJobs() {
+	local IFS servers serversCopy jobs message result messenger
+
+	IFS='
+'
+
+	result="$1"
+	shift
+	$this.getServers servers
+	jobs=
+	while [ $# -ge 2 ]; do
+		# Duplicate servers object.
+		$servers.copy serversCopy
+		# Create a job object.
+		bsda:download:Job job $this $serversCopy "$1" "$2"
+		jobs="${jobs:+$jobs$IFS}$job"
+		shift 2
+
+		# Serialize the servers and job for later delivery.
+		$serversCopy.serialize serversCopy
+		$job.serialize job
+		# Append to the message for submission.
+		message="${message:+$message$IFS}$serversCopy$IFS$job"
+	done
+
+	# Return the jobs.
+	$caller.setvar "$result" "$jobs"
+
+	# Dispatch the jobs.
+	$this.getMessenger messenger
+	while ! $messenger.send "$message"; do
+		# Note that we only can skip reserializing here,
+		# because we know that no other process has these objects
+		# and thus they cannot have been changed.
+		$this.run
+	done
 }
 
 #
@@ -521,20 +570,38 @@ bsda:download:Server.download() {
 	# local.
 	(
 		# Don't let fetch block signals.
+		#
+		# The -T parameter activates asynchronous signal handling,
+		# which means a signal is trapped immediately, no matter which
+		# command is currently executed. Otherwise kill signals would
+		# be acted upon only after the currently active command
+		# completes. This is most likely fetch and thus takes too long.
+		#
+		# The -T parameter is dangerous, do not mess with it unless
+		# you know what is safe to do.
 		set -T
 		trap 'kill $(jobs -s) 2> /dev/null; exit 1' sigint sigterm
+
 		$this.getSender sender
 		$this.getLocation location
 		$job.getSource source
 		$job.getTarget target
 		if ! $job.getSize size; then
+			# If getting the size did not succeed, it has to be
+			# assumed that the file does not exist. Thus instantly
+			# report failure.
 			$sender.send "action=end;job=$job;status=1;time=;"
 			return
 		fi
+		# Report begin of download.
 		time=$(/bin/date -u +%s)
 		$sender.send "action=start;job=$job;size=$size;time=$time;"
+
+		# Synchronize the file with the server.
 		/usr/bin/fetch -qmS "$size" -o "$target" "$location/$source" > /dev/null 2>&1
 		result=$?
+
+		# Report the download result.
 		time=$(/bin/date -u +%s)
 		$sender.send "action=end;job=$job;status=$result;time=$time;"
 	) &
