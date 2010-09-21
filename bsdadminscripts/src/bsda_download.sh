@@ -89,6 +89,8 @@ bsda:obj:createClass bsda:download:Manager \
 		"Creates a bunch of jobs and dispatches them." \
 	x:public:completedJobs \
 		"Get newly completed jobs." \
+	x:public:getStatus \
+		"Returns a status summary from the servers." \
 	x:public:term \
 		"Tell the background downloader to terminate." \
 	x:public:isActive \
@@ -421,6 +423,27 @@ bsda:download:Manager.completedJobs() {
 	$this.setCompletedJobs
 	$caller.setvar "$1" "$jobs"
 	test -n "$jobs"
+}
+
+#
+# Returns a status summary from the servers.
+#
+# This is a simple wrapper around Servers.getStatus().
+#
+# @param &1
+#	The name of the variable to store the number of currently active
+#	downloads in.
+# @param &2
+#	The number of servers the downloads are distributed over.
+# @param &3
+#	The number of all servers.
+# @param &4
+#	The involved jobs, a list of Job instances.
+#
+bsda:download:Manager.getStatus() {
+	local servers
+	$this.getServers servers
+	$servers.getStatus "$@"
 }
 
 #
