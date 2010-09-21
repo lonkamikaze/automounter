@@ -119,7 +119,7 @@ rf_session_delete() {
 #	The session to use.
 #
 rf_init_params() {
-	local IFS arg master mirror mirrors servers manager
+	local IFS arg master mirror mirrors servers manager pkgsites pkgsite
 
 	IFS='
 '
@@ -132,10 +132,23 @@ rf_init_params() {
 		shift
 
 		case "$arg" in
-		--uma)
+		-L | --uma-latest)
 			# Inject the UMA stuff into the parameters.
 			eval "$(uma env)"
-			set -- "$PACKAGESITE" $PACKAGESITE_MIRRORS "$@"
+			pkgsites="${PACKAGESITE%/*?}/Latest"
+			for pkgsite in $pkgsites; do
+				pkgsites="$pkgsites$IFS${pkgsite%/*?}/Latest"
+			done
+			set -- $pkgsites "$@"
+		;;
+		-A | --uma-all)
+			# Inject the UMA stuff into the parameters.
+			eval "$(uma env)"
+			pkgsites="${PACKAGESITE%/*?}/All"
+			for pkgsite in $pkgsites; do
+				pkgsites="$pkgsites$IFS${pkgsite%/*?}/All"
+			done
+			set -- $pkgsites "$@"
 		;;
 		'')
 		;;
