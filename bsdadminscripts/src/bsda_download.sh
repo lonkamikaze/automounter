@@ -142,7 +142,7 @@ bsda:download:Manager.downloader() {
 	trap "$scheduler.stop" sigint sigterm
 
 	# Create a sleeper job.
-	bsda:scheduler:Sleep sleeper 1
+	bsda:scheduler:Sleep sleeper 0.5
 
 	# Register initial jobs.
 	$scheduler.register $sleeper

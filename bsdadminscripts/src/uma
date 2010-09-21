@@ -93,8 +93,6 @@ esac
 : ${BRANCH=$branch}
 : ${PACKAGESITE="$PACKAGEROOT/pub/FreeBSD/ports/$ARCH/packages-$BRANCH/Latest"}
 packagetree="${PACKAGESITE%/*?}"
-ftp="${PACKAGESITE#*://}"
-ftp="${ftp%%/*}"
 
 #
 # Generate PACKAGESITE_MIRRORS if only PACKAGEROOT_MIRRORS are given.
