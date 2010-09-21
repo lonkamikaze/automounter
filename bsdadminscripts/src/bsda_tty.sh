@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 0.9
+# version 0.99
 
 # Include once.
 test -n "$bsda_tty" && return 0
@@ -1032,7 +1032,7 @@ bsda:tty:Terminal.line() {
 #
 bsda:tty:Terminal.stdout() {
 	local IFS output draw active visible count maxli maxco lines
-	local glitch tabstops
+	local glitch tabstops discard
 
 	IFS='
 '
@@ -1101,8 +1101,13 @@ bsda:tty:Terminal.stdout() {
 			lines="${draw##*.}"
 			draw="${draw%.*}"
 
+			# Filter characters that might endanger glob pattern
+			# substitution.
+			discard="$(echo "$draw." | /usr/bin/tr '#[]*{}' '??????')"
+			discard="${discard%.}"
+
 			# Remove the current draw from the remaining output.
-			output="${output#$draw}"
+			output="${output#$discard}"
 
 			# Move the status lines down behind the position where
 			# the output will end.
@@ -1142,8 +1147,13 @@ bsda:tty:Terminal.stdout() {
 			lines="${draw##*.}"
 			draw="${draw%.*}"
 
+			# Filter characters that might endanger glob pattern
+			# substitution.
+			discard="$(echo "$draw." | /usr/bin/tr '#[]*{}' '??????')"
+			discard="${discard%.}"
+
 			# Remove the current draw from the remaining output.
-			output="${output#$draw}"
+			output="${output#$discard}"
 
 			# Draw the output.
 			echo -n "$draw" > /dev/tty
