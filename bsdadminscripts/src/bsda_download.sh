@@ -235,7 +235,7 @@ bsda:download:Manager.runDownloader() {
 	# Check whether the controlling process is still present, if one was
 	# specified.
 	$this.getControllerPID controllerPID
-	if [ -n "$controllerPID" ] && ! /bin/kill -0 "$controllerPID"; then
+	if [ -n "$controllerPID" ] && ! /bin/kill -0 "$controllerPID" 2> /dev/null; then
 		$scheduler.stop
 		return
 	fi
@@ -464,7 +464,7 @@ bsda:download:Server.clean() {
 	# Kill all downloads.
 	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
 	if [ -n "$downloads" ]; then
-		/bin/kill -TERM $downloads
+		/bin/kill $downloads 2> /dev/null
 		$this.setDownloads
 	fi
 
@@ -529,6 +529,7 @@ bsda:download:Server.download() {
 		$job.getTarget target
 		if ! $job.getSize size; then
 			$sender.send "action=end;job=$job;status=1;time=;"
+			return
 		fi
 		time=$(/bin/date -u +%s)
 		$sender.send "action=start;job=$job;size=$size;time=$time;"
@@ -703,7 +704,7 @@ bsda:download:Server.stop() {
 	# Get the list of currently running downloads and kill them all.
 	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
 	if [ -n "$downloads" ]; then
-		/bin/kill $downloads
+		/bin/kill $downloads 2> /dev/null
 		$this.setDownloads
 	fi
 }
@@ -1124,6 +1125,7 @@ bsda:download:Job.downloadFailed() {
 
 		# Delete the list of servers.
 		$servers.delete
+		$this.setServers
 
 		# Store success status (failed).
 		$this.setSuccess 1
