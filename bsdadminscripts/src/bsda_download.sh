@@ -199,7 +199,7 @@ bsda:download:Manager.runController() {
 	$messenger.receive lines count
 
 	# Nothing returned, skip the rest.
-	if [ -z "$count" ]; then
+	if [ $count -eq 0 ]; then
 		return 0
 	fi
 
@@ -246,6 +246,12 @@ bsda:download:Manager.runDownloader() {
 
 	$this.getMessenger messenger
 	$messenger.receive lines count
+
+	# Nothing returned, skip the rest.
+	if [ $count -eq 0 ]; then
+		return 0
+	fi
+
 	$this.getJobQueue jobQueue
 	for line in $lines; do
 		# Deserialize objects or execute remote commands.
