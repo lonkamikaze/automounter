@@ -289,7 +289,7 @@ bsda:messaging:FileSystemListener.receive() {
 
 	# Read and append an empty line saving postfix.
 	result="$(
-		awk "NR > $position END {print \"EOF\"}" "$queue"
+		/usr/bin/awk "NR > $position END {print \"EOF\"}" "$queue"
 	)"
 
 	# Permit writing to the file.
@@ -297,7 +297,7 @@ bsda:messaging:FileSystemListener.receive() {
 
 	# Get the mumber lines read. Because wc -l never returns 0, the
 	# postfix helps us distuinguish between 1 and 0 lines.
-	lines=$(($(echo "$result" | wc -l) - 1))
+	lines=$(($(echo "$result" | /usr/bin/wc -l) - 1))
 
 	# Update position.
 	setvar ${this}position $(($position + $lines))
@@ -336,7 +336,7 @@ bsda:messaging:FileSystemListener.receiveLine() {
 
 	# Read a line and append an empty line saving postfix.
 	result="$(
-		awk "NR == $position + 1 END {print \"EOF\"}" "$queue"
+		/usr/bin/awk "NR == $position + 1 END {print \"EOF\"}" "$queue"
 	)"
 
 	# Permit writing to the file.
@@ -344,7 +344,7 @@ bsda:messaging:FileSystemListener.receiveLine() {
 
 	# Get the mumber lines read. Because wc -l never returns 0, the
 	# postfix helps us distuinguish between 1 and 0 lines.
-	lines=$(($(echo "$result" | wc -l) - 1))
+	lines=$(($(echo "$result" | /usr/bin/wc -l) - 1))
 
 	# Update position.
 	setvar ${this}position $(($position + $lines))
@@ -463,7 +463,7 @@ bsda:messaging:FileSystemMessenger.send() {
 
 	# Check whether this process is up to date. I.e. there are no unread
 	# messages in the queue.
-	if [ $(($(wc -l < "$queue") - $position)) -eq 0 ]; then
+	if [ $(($(/usr/bin/wc -l < "$queue") - $position)) -eq 0 ]; then
 		# This process is up to date. Write the data.
 		echo "$1" >> "$queue"
 
