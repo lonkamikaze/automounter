@@ -265,8 +265,8 @@ bsda:tty:Library.format() {
 	outvar="$1"
 	pattern="$2"
 	shift 2
-	columns=$(test -e /dev/tty && tput co 2> /dev/tty || echo 80)
-	tput xn || columns=$((columns - 1))
+	columns=$(test -e /dev/tty && /usr/bin/tput co 2> /dev/tty || echo 80)
+	/usr/bin/tput xn || columns=$((columns - 1))
 
 	#
 	# Normally the format pattern is parsed two times. The first time
@@ -301,18 +301,18 @@ bsda:tty:Library.format() {
 			# Limit to the width if one was specified.
 			if [ -n "$cutdirection" ]; then
 				# Cut from the left.
-				arg="$(echo "$arg" | sed -E "s,.*(.{$width})$,\1,")"
+				arg="$(echo "$arg" | /usr/bin/sed -E "s,.*(.{$width})$,\1,")"
 			else
 				# Cut from the right.
-				arg="$(echo "$arg" | sed -E "s,^(.{$width}).*,\1,")"
+				arg="$(echo "$arg" | /usr/bin/sed -E "s,^(.{$width}).*,\1,")"
 			fi
 		fi 2> /dev/null
 
 		# Preserve argument.
 		set -- "$@" "$arg"
-		printf="$(echo "$printf" | sed -E "s,$format,%$pad$width$style,")"
+		printf="$(echo "$printf" | /usr/bin/sed -E "s,$format,%$pad$width$style,")"
 	done
-	output="$(printf "$printf" "$@")"
+	output="$(/usr/bin/printf "$printf" "$@")"
 
 	#
 	# The second pattern parsing is performed to adjust the width of
@@ -359,22 +359,22 @@ bsda:tty:Library.format() {
 					# Remove from arg.
 					if [ -n "$cutdirection" ]; then
 						# Cut from the left.
-						arg="$(echo "$arg" | sed -E "s,.*(.{$width})$,\1,")"
+						arg="$(echo "$arg" | /usr/bin/sed -E "s,.*(.{$width})$,\1,")"
 					else
 						# Cut from the right.
-						arg="$(echo "$arg" | sed -E "s,^(.{$width}).*,\1,")"
+						arg="$(echo "$arg" | /usr/bin/sed -E "s,^(.{$width}).*,\1,")"
 					fi 2> /dev/null
 				fi
 			fi
 	
 			# Preserve argument.
 			set -- "$@" "$arg"
-			printf="$(echo "$printf" | sed -E "s,$format,%$pad$width$style,")"
+			printf="$(echo "$printf" | /usr/bin/sed -E "s,$format,%$pad$width$style,")"
 		done
 	fi
 
 	# Return the result.
-	output="$(printf "$printf" "$@" | sed -E "s,^(.{$columns}),\1,")"
+	output="$(/usr/bin/printf "$printf" "$@" | /usr/bin/sed -E "s,^(.{$columns}),\1,")"
 	$caller.setvar "$outvar" "$output"
 }
 
@@ -448,7 +448,7 @@ bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library \
 #
 bsda:tty:Terminal.init() {
 	if [ -e /dev/tty ]; then
-		tput vi > /dev/tty
+		/usr/bin/tput vi > /dev/tty
 		$this.setActive 1
 		$this.setCount 0
 		$this.setVisible 1
@@ -467,7 +467,7 @@ bsda:tty:Terminal.clean() {
 	$this.getActive active
 	if [ -n "$active" ]; then
 		$this.hide
-		tput ve > /dev/tty
+		/usr/bin/tput ve > /dev/tty
 	fi
 
 	$this.flush
@@ -489,9 +489,9 @@ bsda:tty:Terminal.draw() {
 '
 
 	$this.getDisplayBuffer buffer count
-	tput cr AL $count
+	/usr/bin/tput cr AL $count
 	echo -n "$buffer"
-	tput cr $(test $count -gt 1 && jot -b up $((count - 1)))
+	/usr/bin/tput cr $(test $count -gt 1 && /usr/bin/jot -b up $((count - 1)))
 }
 
 #
@@ -505,7 +505,7 @@ bsda:tty:Terminal.draw() {
 #
 bsda:tty:Terminal.getDisplayCount() {
 	local count maxlines
-	maxlines=$(($(tput li 2> /dev/tty || echo 24) / 2))
+	maxlines=$(($(/usr/bin/tput li 2> /dev/tty || echo 24) / 2))
 	$this.getCount count
 	if [ $count -gt $maxlines ]; then
 		count="$maxlines"
@@ -534,8 +534,8 @@ bsda:tty:Terminal.getDisplayBuffer() {
 '
 
 	# Get the maximum columns from the terminal.
-	maxco=$(tput co 2> /dev/tty || echo 80)
-	tput xn || maxco=$((maxco - 1))
+	maxco=$(/usr/bin/tput co 2> /dev/tty || echo 80)
+	/usr/bin/tput xn || maxco=$((maxco - 1))
 
 	# Get the number of status lines to display and acquire them
 	# from the buffer. Reduce them to the permitted number of collumns.
@@ -543,9 +543,9 @@ bsda:tty:Terminal.getDisplayBuffer() {
 	if [ $count -gt 0 ]; then
 		buffer="$(
 			$this.getBuffer \
-				| head -n $count \
-				| sed -E "s/(.{$maxco}).*/\\1/"
-			printf .
+				| /usr/bin/head -n $count \
+				| /usr/bin/sed -E "s/(.{$maxco}).*/\\1/"
+			echo -n .
 		)"
 	else
 		buffer=
@@ -610,16 +610,16 @@ bsda:tty:Terminal.use() {
 			index=$((index + 1))
 		done
 		if [ $1 -gt 0 ]; then
-			providers="$(echo "$providers" | head -n $1 ; printf .)"
+			providers="$(echo "$providers" | /usr/bin/head -n $1 ; echo -n .)"
 			providers="${providers%$IFS.}"
-			buffer="$(echo "$buffer" | head -n $1 ; printf .)"
+			buffer="$(echo "$buffer" | /usr/bin/head -n $1 ; echo -n .)"
 			buffer="${buffer%$IFS.}"
 		else
 			providers=
 		fi
 	elif [ $count -lt $1 ]; then
 		# Increase the count.
-		for index in $(jot $(($1 - count)) $count); do
+		for index in $(/usr/bin/jot $(($1 - count)) $count); do
 			if [ $index -eq 0 ]; then
 				continue
 			fi
@@ -654,7 +654,7 @@ bsda:tty:Terminal.hide() {
 	$this.getVisible visible
 
 	if [ -n "$visible" ]; then
-		tput AL $(tput li 2> /dev/tty || echo 24)
+		/usr/bin/tput AL $(/usr/bin/tput li 2> /dev/tty || echo 24)
 		$this.setVisible
 	fi > /dev/tty
 }
@@ -739,7 +739,7 @@ bsda:tty:Terminal.refresh() {
 				fi
 				# Sed counts from 1, so pad the index.
 				index="$((index + 1))"
-				provider="$(echo "$providers" | sed "$index!d")"
+				provider="$(echo "$providers" | /usr/bin/sed "$index!d")"
 			fi
 			if [ -z "$provider" ]; then
 				# If no provider is attached, nothing to be done.
@@ -752,7 +752,7 @@ bsda:tty:Terminal.refresh() {
 	fi
 
 	# Update the buffer.
-	buffer="$($this.getBuffer | sed "$sedcmd" ; printf .)"
+	buffer="$($this.getBuffer | /usr/bin/sed "$sedcmd" ; echo -n .)"
 	$this.setBuffer "${buffer%$IFS.}"
 
 	# Redraw status lines.
@@ -818,7 +818,7 @@ bsda:tty:Terminal.attach() {
 
 	# Update the buffer.
 	$provider.reportStatus line
-	buffer="$($this.getBuffer | sed "$(($index + 1))c\\$IFS$line\\$IFS" ; printf .)"
+	buffer="$($this.getBuffer | /usr/bin/sed "$(($index + 1))c\\$IFS$line\\$IFS" ; echo -n .)"
 	$this.setBuffer "${buffer%$IFS.}"
 
 	# Draw the updated buffer, if necessary.
@@ -826,7 +826,7 @@ bsda:tty:Terminal.attach() {
 	test -n "$visible" && $this.draw > /dev/tty
 	
 	# Attach the provider.
-	providers="$($this.getProviders | sed "$((index + 1))c\\$IFS$provider\\$IFS" ; printf .)"
+	providers="$($this.getProviders | /usr/bin/sed "$((index + 1))c\\$IFS$provider\\$IFS" ; echo -n .)"
 	$this.setProviders "${providers%$IFS.}"
 
 	return 0
@@ -855,7 +855,7 @@ bsda:tty:Terminal.flush() {
 	$this.getCount count
 	providers=
 	if [ $count -gt 0 ]; then
-		for index in $(jot $count); do
+		for index in $(/usr/bin/jot $count); do
 			providers="$providers$IFS"
 		done
 	fi
@@ -910,11 +910,11 @@ bsda:tty:Terminal.detach() {
 		)"
 
 		# Empty the affected lines in the providers list.
-		providers="$(echo "$providers" | sed "$sedcmd" ; printf .)"
+		providers="$(echo "$providers" | /usr/bin/sed "$sedcmd" ; echo -n .)"
 		$this.setProviders "${providers%$IFS.}"
 
 		# Empty the affected lines in the buffer.
-		buffer="$($this.getBuffer | sed "$sedcmd" ; printf .)"
+		buffer="$($this.getBuffer | /usr/bin/sed "$sedcmd" ; echo -n .)"
 		$this.setBuffer="${buffer%$IFS.}"
 	else
 		# The given parameter is an index.
@@ -935,7 +935,7 @@ bsda:tty:Terminal.detach() {
 
 		# Get the provider at the index position.
 		$this.getProviders providers
-		provider="$(echo "$providers" | sed "$(index + 1)!d")"
+		provider="$(echo "$providers" | /usr/bin/sed "$(index + 1)!d")"
 
 		# If there was a provider at the index position, notify it
 		# about the disconnect.
@@ -944,10 +944,10 @@ bsda:tty:Terminal.detach() {
 		fi
 
 		# Empty the line in the buffer.
-		buffer="$($this.getBuffer | sed "$(index + 1))g" ; printf .)"
+		buffer="$($this.getBuffer | /usr/bin/sed "$(index + 1))g" ; echo -n .)"
 		$this.setBuffer "${buffer%$IFS.}"
 		# Empty the line in the providers list.
-		providers="$(echo "$providers" | sed "$((index + 1))g" ; printf .)"
+		providers="$(echo "$providers" | /usr/bin/sed "$((index + 1))g" ; echo -n .)"
 		$this.setProviders "${providers%$IFS.}"
 	fi
 }
@@ -995,21 +995,21 @@ bsda:tty:Terminal.line() {
 	$this.getDisplayCount count
 	if [ -n "$visible" -a $pos -lt $count ]; then
 		# Crop the line to display.
-		maxco=$(tput co 2> /dev/tty || echo 80)
-		tput xn || maxco=$((maxco - 1))
-		line="$(echo "$2" | sed -E -e '1!d' -e "1s/(.{$maxco}).*/\\1/")"
+		maxco=$(/usr/bin/tput co 2> /dev/tty || echo 80)
+		/usr/bin/tput xn || maxco=$((maxco - 1))
+		line="$(echo "$2" | /usr/bin/sed -E -e '1!d' -e "1s/(.{$maxco}).*/\\1/")"
 
 		# Jump to the right line.
-		tput cr $(test $pos -gt 0 && jot -b do $pos) ce
+		/usr/bin/tput cr $(test $pos -gt 0 && /usr/bin/jot -b do $pos) ce
 		# Draw it.
 		echo -n "$line"
 		# Return the cursor to its origin.
-		tput cr $(test $pos -gt 0 && jot -b up $pos)
+		/usr/bin/tput cr $(test $pos -gt 0 && /usr/bin/jot -b up $pos)
 	fi > /dev/tty
 
 	# Store the new line in the status line buffer.
 	$this.getCount count
-	buffer="$($this.getBuffer | sed "$((pos + 1))c\\$IFS${2%%$IFS*}\\$IFS" ; printf .)"
+	buffer="$($this.getBuffer | /usr/bin/sed "$((pos + 1))c\\$IFS${2%%$IFS*}\\$IFS" ; echo -n .)"
 	$this.setBuffer "${buffer%$IFS.}"
 
 	return 0
@@ -1057,15 +1057,15 @@ bsda:tty:Terminal.stdout() {
 	maxli=0
 	if [ -n "$active" ]; then
 		# Get the maximum lines and columns from the terminal.
-		maxli=$(tput li 2> /dev/tty || echo 24)
-		maxco=$(tput co 2> /dev/tty || echo 80)
+		maxli=$(/usr/bin/tput li 2> /dev/tty || echo 24)
+		maxco=$(/usr/bin/tput co 2> /dev/tty || echo 80)
 
 		# Get the tab stop width.
-		tabstops=$(tput it)
+		tabstops=$(/usr/bin/tput it || echo 8)
 
 		# Set this to 0 if the terminal eats the newline glitch,
 		# otherwise set it to 1.
-		tput xn
+		/usr/bin/tput xn
 		glitch=$?
 	fi
 
@@ -1095,7 +1095,7 @@ bsda:tty:Terminal.stdout() {
 			draw="$(
 				echo -n "$output" \
 					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
-				printf .$?
+				echo -n .$?
 			)"
 			# The number of lines is returned by the script.
 			lines="${draw##*.}"
@@ -1111,7 +1111,7 @@ bsda:tty:Terminal.stdout() {
 
 			# Move the status lines down behind the position where
 			# the output will end.
-			tput AL $lines > /dev/tty
+			/usr/bin/tput AL $lines > /dev/tty
 
 			# Draw the output and the status lines, in case they
 			# got moved out of the terminal window.
@@ -1119,15 +1119,15 @@ bsda:tty:Terminal.stdout() {
 
 			# Go to the beginning of the status lines, save cursor,
 			# go up to where output should start.
-			tput cr $(test $count -gt 1 && jot -b up $((count - 1))) sc \
-				$(jot -b up $lines) > /dev/tty
+			/usr/bin/tput cr $(test $count -gt 1 && /usr/bin/jot -b up $((count - 1))) \
+				sc $(/usr/bin/jot -b up $lines) > /dev/tty
 
 			# Finally put the output on stdout.
 			echo -n "$draw"
 
 			# Restore cursor position, in case the output was
 			# redirected.
-			tput rc > /dev/tty
+			/usr/bin/tput rc > /dev/tty
 		done
 	elif [ -n "$active" -a $maxli -gt 1 ]; then
 		# We are not visible, but active. I.e. perform output duplication.
@@ -1141,7 +1141,7 @@ bsda:tty:Terminal.stdout() {
 			draw="$(
 				echo -n "$output" \
 					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
-				printf .$?
+				echo -n .$?
 			)"
 			# The number of lines is returned by the script.
 			lines="${draw##*.}"
@@ -1160,14 +1160,14 @@ bsda:tty:Terminal.stdout() {
 
 			# Save the cursor position and go up to where output
 			# should start.
-			tput sc $(jot -b up $lines) > /dev/tty
+			/usr/bin/tput sc $(jot -b up $lines) > /dev/tty
 
 			# Finally put the output on stdout.
 			echo -n "$draw"
 
 			# Restore cursor position, in case the output was
 			# redirected.
-			tput rc > /dev/tty
+			/usr/bin/tput rc > /dev/tty
 		done
 	else
 		# Simply output stuff.
