@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-readonly version=1.4.1
+readonly version=1.4.2
 readonly name=uma
 
 # Return value.
@@ -32,13 +32,18 @@ trap '' int
 # Used to activate verbose output.
 verbose=
 
-#readonly vardir="%%VAR%%"
-readonly vardir="/var"
-readonly lock="$vardir/run/$name.lock"
-readonly lockpid="$vardir/run/$name.pid"
-readonly identpid="$vardir/run/$name.ident.pid"
-#readonly conf="%%PREFIX%%/etc/$name.conf"
-readonly conf="/usr/local/etc/$name.conf"
+vardir="%%VAR%%"
+ports="%%PORTS%%"
+prefix="%%PREFIX%%"
+#HACK
+vardir="/var"
+ports="/usr/ports"
+prefix="/usr/local"
+#hack
+conf="$prefix/etc/$name.conf"
+lock="$vardir/run/$name.lock"
+lockpid="$vardir/run/$name.pid"
+identpid="$vardir/run/$name.ident.pid"
 
 # Use line breaks as a delimiter.
 IFS='
@@ -104,32 +109,32 @@ packagetree="${PACKAGESITE%/*?}"
 #
 
 # Set PACKAGEROOT_MIRRORS if not set.
-if [ -z "$PACKAGEROOT_MIRRORS" ]; then
+if ! set | /usr/bin/grep -qx "PACKAGEROOT_MIRRORS=.*"; then
 	PACKAGEROOT_MIRRORS=
 	for i in $(jot 14); {
 		PACKAGEROOT_MIRRORS="${PACKAGEROOT_MIRRORS:+$PACKAGEROOT_MIRRORS$IFS}http://ftp$i.FreeBSD.org"
 	}
 fi
-
 # Convert semicolon in PACKAGEROOT_MIRRORS.
-PACKAGEROOT_MIRRORS="$(echo "$PACKAGEROOT_MIRRORS" | sed "s/;/\\$IFS/g")"
+PACKAGEROOT_MIRRORS="$(echo "$PACKAGEROOT_MIRRORS" | /usr/bin/sed "s/;/\\$IFS/g")"
+
 # Build PACKAGESITE_MIRRORS.
-if [ -z "${PACKAGESITE_MIRRORS}" ]; then
+if ! set | /usr/bin/grep -qx "PACKAGESITE_MIRRORS=.*"; then
 	PACKAGESITE_MIRRORS=
 	for MIRROR in $PACKAGEROOT_MIRRORS; {
 		PACKAGESITE_MIRRORS="${PACKAGESITE_MIRRORS:+$PACKAGESITE_MIRRORS$IFS}$MIRROR/pub/FreeBSD/ports/$ARCH/packages-$BRANCH/Latest"
 	}
 fi
 # Convert semicolon in PACKAGESITE_MIRRORS.
-PACKAGESITE_MIRRORS="$(echo "$PACKAGESITE_MIRRORS" | sed "s/;/\\$IFS/g")"
+PACKAGESITE_MIRRORS="$(echo "$PACKAGESITE_MIRRORS" | /usr/bin/sed "s/;/\\$IFS/g")"
 
 # Remove duplicates.
-PACKAGEROOT_MIRRORS="$(echo "$PACKAGEROOT_MIRRORS" | sort -u)"
-PACKAGESITE_MIRRORS="$(echo "$PACKAGESITE_MIRRORS" | sort -u)"
+PACKAGEROOT_MIRRORS="$(echo "$PACKAGEROOT_MIRRORS" | /usr/bin/sort -u)"
+PACKAGESITE_MIRRORS="$(echo "$PACKAGESITE_MIRRORS" | /usr/bin/sort -u)"
 
 # Determine portsdir
-portsdir=$(make -V PORTSDIR -f /usr/share/mk/bsd.port.mk 2> /dev/null)
-portsdir="${portsdir:-%%PORTS%%}"
+portsdir=$(/usr/bin/make -V PORTSDIR -f /usr/share/mk/bsd.port.mk 2> /dev/null)
+portsdir="${portsdir:-$ports}"
 
 export ARCH BRANCH PKG_INDEX PKG_MOVED PKG_UPDATING FTP_TIMEOUT
 export FTP_PASSIVE_MODE PACKAGEROOT PACKAGESITE
@@ -177,13 +182,13 @@ verbose() {
 #	The location of the PID file for the lock holding process.
 #
 secureLock() {
-	lockf "$lock" sh -c "
+	/usr/bin/lockf "$lock" sh -c "
 		trap 'exit 0' term
 		echo '$pid' > '$lock'
 		echo \"\$\$\" > '$lockpid'
-		trap 'rm \"$lockpid\"; exit 0' EXIT
-		while kill -0 '$pid' 2> /dev/null; do
-			sleep 2
+		trap '/bin/rm \"$lockpid\"; exit 0' EXIT
+		while /bin/kill -0 '$pid' 2> /dev/null; do
+			/bin/sleep 2
 		done
 	" 2> /dev/null &
 }
@@ -200,7 +205,7 @@ secureLock() {
 #	if the lock is missing or owned by another process.
 #
 hasLock() {
-	test "$pid" -eq "$(cat "$lock" 2> /dev/null)" 2> /dev/null
+	test "$pid" -eq "$(/bin/cat "$lock" 2> /dev/null)" 2> /dev/null
 	return $?
 }
 
@@ -225,14 +230,14 @@ lock() {
 	hasLock && return 0
 
 	# The process requesting the lock does not exist.
-	kill -0 "$pid" 2> /dev/null || return 1 $(errno=1)
+	/bin/kill -0 "$pid" 2> /dev/null || return 1 $(errno=1)
 
 	# Follow symlinks
 	location="$(pwd)"
 	if cd "$portsdir" 2> /dev/null && portsdir="$(pwd -P)"; then
 		# Portsdir exists, so we should test for make activity. This
 		# does not cover all cases, but it covers a lot.
-		if fstat -u "$USER" | awk '{print $2}' | grep -q make; then
+		if /usr/bin/fstat -u "$USER" | /usr/bin/awk '{print $2}' | /usr/bin/grep -q make; then
 			errno=1
 			return 1
 		fi
@@ -240,7 +245,7 @@ lock() {
 	cd "$location"
 
 	# Try acquiring the lock.
-	lockf -st 0 "$lock" "$0" secure $pid 2> /dev/null || return 1 $(errno=1)
+	/usr/bin/lockf -st 0 "$lock" "$0" secure $pid 2> /dev/null || return 1 $(errno=1)
 	# Wait until the locking process is properly set up.
 	while ! [ -e "$lockpid" -a -e "$lock" ]; do
 		sleep 0.1
@@ -261,10 +266,10 @@ lock() {
 unlock() {
 	if hasLock; then
 		# Free the lock.
-		kill -TERM "$(cat "$lockpid")"
+		/bin/kill -TERM "$(/bin/cat "$lockpid")"
 		# Wait for the locking process to clean up.
 		while [ -e "$lockpid" -o -e "$lock" ]; do
-			sleep 0.1
+			/bin/sleep 0.1
 		done
 		return 0
 	else
@@ -357,8 +362,8 @@ readParams() {
 #
 compareCheckSum()  {
 	local sum
-	expectedSum="$(sed 's/.*[[:space:]]//1' "$2.$1")"
-	sum="$($1 -q "$2" 2> /dev/null)"
+	expectedSum="$(/usr/bin/sed 's/.*[[:space:]]//1' "$2.$1")"
+	sum="$(/sbin/$1 -q "$2" 2> /dev/null)"
 
 	# Return comparison result.
 	test "$sum" = "$expectedSum"
@@ -382,15 +387,15 @@ downloadBZ2File() {
 	&& compareCheckSum sha256 "$2.bz2" \
 	|| (
 		# Fetch, checksum and unzip.
-		fetch -mo "$2.bz2" "$1.bz2" \
+		/usr/bin/fetch -mo "$2.bz2" "$1.bz2" \
 		&& compareCheckSum md5 "$2.bz2" \
 		&& compareCheckSum sha256 "$2.bz2" \
-		&& bunzip2 -kf "$2.bz2"
+		&& /usr/bin/bunzip2 -kf "$2.bz2"
 	) \
 	&& (
 		# Unzip if the uncompressed version is outdated.
 		test -e "$2" -a ! "$2" -nt "$2.bz2" -a ! "$2" -ot "$2.bz2" \
-		|| bunzip2 -kf "$2.bz2"
+		|| /usr/bin/bunzip2 -kf "$2.bz2"
 	)
 }
 
@@ -455,20 +460,20 @@ fi
 # Ports tree commands.
 if [ -n "$cmd_ports" ]; then
 	if [ -n "$cmd_fetch" ]; then
-		portsnap fetch || errno="$((1 << ERR_FETCH_PORTS | errno))"
+		/usr/sbin/portsnap fetch || errno="$((1 << ERR_FETCH_PORTS | errno))"
 	fi
 	if [ -n "$cmd_extract" ]; then
-		portsnap extract || errno=$((1 << ERR_EXTRACT_PORTS | errno))
+		/usr/sbin/portsnap extract || errno=$((1 << ERR_EXTRACT_PORTS | errno))
 	fi
 	if [ -n "$cmd_update" ]; then
-		portsnap update || errno=$((1 << ERR_UPDATE_PORTS | errno))
+		/usr/sbin/portsnap update || errno=$((1 << ERR_UPDATE_PORTS | errno))
 	fi
 fi
 
 # Portaudit commands.
 if [ -n "$cmd_audit" ]; then
 	if [ -n "$cmd_fetch" ]; then
-		portaudit -F || errno=$((1 << ERR_FETCH_VULNDB | errno))
+		$prefix/sbin/portaudit -F || errno=$((1 << ERR_FETCH_VULNDB | errno))
 	fi
 fi
 
@@ -481,23 +486,23 @@ if [ -n "$cmd_ftpindex" ]; then
 	elif [ -n "$cmd_fetch" ]; then
 		# Do all that download stuff parallel, to not waste so much
 		# time on establishing connections.
-		fetch -mo "$PKG_INDEX.bz2.md5" "$packagetree/INDEX.bz2.md5" &
+		/usr/bin/fetch -mo "$PKG_INDEX.bz2.md5" "$packagetree/INDEX.bz2.md5" &
 		job1=$!
-		fetch -mo "$PKG_INDEX.bz2.sha256" "$packagetree/INDEX.bz2.sha256" &
+		/usr/bin/fetch -mo "$PKG_INDEX.bz2.sha256" "$packagetree/INDEX.bz2.sha256" &
 		job2=$!
 		wait $job1 \
 		&& wait $job2 \
 		|| errno=$((1 << ERR_FETCH_INDEX | errno))
-		fetch -mo "$PKG_MOVED.bz2.md5" "$packagetree/MOVED.bz2.md5" &
+		/usr/bin/fetch -mo "$PKG_MOVED.bz2.md5" "$packagetree/MOVED.bz2.md5" &
 		job3=$!
-		fetch -mo "$PKG_MOVED.bz2.sha256" "$packagetree/MOVED.bz2.sha256" &
+		/usr/bin/fetch -mo "$PKG_MOVED.bz2.sha256" "$packagetree/MOVED.bz2.sha256" &
 		job4=$!
 		wait $job3 \
 		&& wait $job4 \
 		|| errno=$((1 << ERR_FETCH_INDEX | errno))
-		fetch -mo "$PKG_UPDATING.bz2.md5" "$packagetree/UPDATING.bz2.md5" &
+		/usr/bin/fetch -mo "$PKG_UPDATING.bz2.md5" "$packagetree/UPDATING.bz2.md5" &
 		job5=$!
-		fetch -mo "$PKG_UPDATING.bz2.sha256" "$packagetree/UPDATING.bz2.sha256" &
+		/usr/bin/fetch -mo "$PKG_UPDATING.bz2.sha256" "$packagetree/UPDATING.bz2.sha256" &
 		job6=$!
 		wait $job5 \
 		&& wait $job6 \
