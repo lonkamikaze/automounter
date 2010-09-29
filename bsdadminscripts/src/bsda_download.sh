@@ -124,6 +124,7 @@ bsda:download:Manager.init() {
 
 	# Fork away the background downloader.
 	$this.downloader &
+	bsda:obj:fork $!
 	setvar ${this}downloaderPID $!
 }
 
@@ -135,6 +136,9 @@ bsda:download:Manager.init() {
 #
 bsda:download:Manager.downloader() {
 	local scheduler sleeper servers messenger jobQueue
+
+	# Update bsda_obj_pid.
+	bsda:obj:fork
 
 	# Create a scheduler for the jobs.
 	bsda:scheduler:RoundTripScheduler scheduler
@@ -609,7 +613,7 @@ bsda:download:Server.download() {
 		# The -T parameter is dangerous, do not mess with it unless
 		# you know what is safe to do.
 		set -T
-		trap 'kill $(jobs -s) 2> /dev/null; exit 1' sigint sigterm
+		trap '/bin/kill $(jobs -s) 2> /dev/null; exit 1' sigint sigterm
 
 		$this.getSender sender
 		$this.getLocation location
