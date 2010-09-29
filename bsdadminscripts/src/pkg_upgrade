@@ -24,11 +24,20 @@
 version=1.9
 name=pkg_upgrade
 
-# Constant path assignments.
+# The path to run executables belonging to bsdadminscripts from.
 rundir="${0%${0##*/}}"
-#prefix="%%PREFIX%%"
+# The system prefix.
+prefix="%%PREFIX%%"
+# The var location.
+var="%%VAR%%"
+# Default include path.
+bsda_dir="%%DATADIR%%"
+#HACK
 prefix="/usr/local"
-#var="%%VAR%%"
+var="/var"
+bsda_dir="${0%${0##*/}}"
+#hack
+# The configuration file.
 conf="$prefix/etc/$name.conf"
 
 # Get some environment variables from uma. This includes PACKAGESITE,
@@ -39,10 +48,6 @@ eval "$($rundir/uma env $$ | /usr/bin/sed -E "s/^([[:alnum:]_]+=')/export \1/1")
 if [ -e "$conf" ]; then
 	. "$conf"
 fi
-
-# Default include path.
-#readonly bsda_dir="%%DATADIR%%"
-bsda_dir="${0%${0##*/}}"
 
 # Include terminal control library.
 . "${bsda_dir:-.}/bsda_tty.sh"
@@ -216,13 +221,6 @@ pu_params() {
 			pkgReplace="${pkgReplace:+$pkgReplace$IFS}$1|$2"
 			shift 2
 		;;
-		-o*)
-			if [ -z "$1" ]; then
-				errors="${errors:+$errors$IFS}$arg The origin flag expects an old package or origin as its second parameter."
-			fi
-			pkgReplace="${pkgReplace:+$pkgReplace$IFS}${arg#-o}|$1"
-			shift
-		;;
 		-p | --paranoid)
 			if  [ $((flags & pu_FLAG_PARANOID)) -ne 0 ]; then
 				errors="${errors:+$errors$IFS}$arg Cannot be double paranoid."
@@ -267,6 +265,14 @@ pu_params() {
 				errors="${errors:+$errors$IFS}$arg Exit on conflict and replace conflicts are mutually exclusive."
 			fi
 			flags=$((flags | pu_FLAG_EXIT_ON_CONFLICT))
+		;;
+		--orgin=*)
+			# Split long flags that expect parameters.
+			set -- "${arg%%=*}" "${arg#*=}" "$@"
+		;;
+		-o*)
+			# Split short flags that expect parameters.
+			set -- "${arg%%${arg#-?}}" "${arg#-?}" "$@"
 		;;
 		-? | --*)
 			# Complain about broken parameters.

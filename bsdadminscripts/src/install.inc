@@ -8,6 +8,12 @@
 
 files="
 bsdadminscripts.1,0644,%%MAN%%/man1/bsdadminscripts.1.gz
+bsda_download.sh,0644,%%DATADIR%%/bsda_download.sh
+bsda_messaging.sh,0644,%%DATADIR%%/bsda_messaging.sh
+bsda_obj.sh,0644,%%DATADIR%%/bsda_obj.sh
+bsda_pkg.sh,0644,%%DATADIR%%/bsda_pkg.sh
+bsda_scheduler.sh,0644,%%DATADIR%%/bsda_scheduler.sh
+bsda_tty.sh,0644,%%DATADIR%%/bsda_tty.sh
 buildflags.awk,0755,%%DATADIR%%/buildflags.awk
 buildflags.conf.sample,0644,%%PREFIX%%/etc/buildflags.conf.sample
 buildflags.mk,0644,%%DATADIR%%/buildflags.mk
@@ -98,7 +104,7 @@ replace="
 %%DATADIR%%,$datadir
 "
 
-replace_cmd="sed"
+replace_cmd="sed -e '/#HACK/,/#hack/d'"
 
 IFS='
 '
