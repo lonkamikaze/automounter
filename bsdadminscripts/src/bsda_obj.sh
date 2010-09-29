@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 1.14
+# version 1.15
 
 # Include once.
 test -n "$bsda_obj" && return 0
@@ -58,16 +58,17 @@ bsda_obj=1
 # 10) SERIALIZE
 # 10.1) Serializing
 # 10.2) Deserializing
-# 11) REFLECTION & REFACTORING
-# 11.1) Attributes
-# 11.2) Methods
-# 11.3) Parent Classes and Interfaces
-# 12) COMPATIBILITY
-# 12.1) POSIX
-# 12.2) bash - local
-# 12.3) bash - setvar
-# 12.4) bash - Command Substitution Variable Scope
-# 12.5) bash - alias
+# 11) FORKING PROCESSES
+# 12) REFLECTION & REFACTORING
+# 12.1) Attributes
+# 12.2) Methods
+# 12.3) Parent Classes and Interfaces
+# 13) COMPATIBILITY
+# 13.1) POSIX
+# 13.2) bash - local
+# 13.3) bash - setvar
+# 13.4) bash - Command Substitution Variable Scope
+# 13.5) bash - alias
 # bsda:obj:createClass()
 # bsda:obj:createInterface()
 # bsda:obj:getVar()
@@ -84,6 +85,7 @@ bsda_obj=1
 # bsda:obj:callerSetup()
 # bsda:obj:callerFinish()
 # bsda:obj:callerSetvar()
+# bsda:obj:fork()
 #
 
 #
@@ -635,7 +637,40 @@ bsda_obj=1
 #
 
 #
-# 11) REFLECTION & REFACTORING
+# 11) FORKING PROCESSES
+#
+# One of the intended uses of serializing is that a process forks and both
+# processes are able to pass new or updated objects to each others and thus
+# keep each other up to date.
+#
+# When a process is forked, both processes retain the same state, the only
+# difference is the parent process now has $! set to the PID of the new child.
+#
+# This means the forked process does not know its own PID ($$ still holds the
+# PID of the parent process) and thus both processes are in danger of
+# createing objects with identical IDs. As soon as these get passed on, they
+# overwrite each other.
+#
+# The function bsda:obj:fork() can be used to circumvent this problem. The
+# bsda:obj framework reads the process ID from the variable bsda_obj_pid,
+# which is initialized with $$. The bsda:obj:fork() function can be used to
+# update the variable in a forked process.
+#
+# The following example illustrates its use.
+#
+#	(
+#		bsda:obj:fork
+#		# Do something ...
+#	) &
+#	bsda:obj:fork $!
+#
+# It might also be desirable for some applications to know their PID, reading
+# it from bsda_obj_pid instead of $$ solves this problem if the bsda:obj:fork()
+# functions is used.
+#
+
+#
+# 12) REFLECTION & REFACTORING
 #
 # The bsda:obj framework offers full reflection. Refactoring is not supported,
 # but possible to a limited degree.
@@ -644,7 +679,7 @@ bsda_obj=1
 # A new class tells all its parents "I'm one of yours" and takes all the
 # methods and attributes for itself.
 #
-# 11.1) Attributes
+# 12.1) Attributes
 #
 # Each class offers the static method getAttributes():
 #
@@ -663,7 +698,7 @@ bsda_obj=1
 #		bsda:obj:getVar $object$attribute
 #	done
 #
-# 11.2) Methods
+# 12.2) Methods
 #
 # Each class also offers the static method getMethods():
 #
@@ -695,7 +730,7 @@ bsda_obj=1
 #	this=$tmpThis
 #	class=$tmpClass
 #
-# 11.3) Parent Classes and Interfaces
+# 12.3) Parent Classes and Interfaces
 #
 # Each class knows its parents and interfaces and reveals them through the
 # static getParents() and getInterfaces() methods:
@@ -724,7 +759,7 @@ bsda_obj=1
 #
 
 #
-# 12) COMPATIBILITY
+# 13) COMPATIBILITY
 #
 # This framework was written for the bourne shell clone, provided with the
 # FreeBSD operating system (a descendant of the Almquist shell). To open it
@@ -744,7 +779,7 @@ bsda_obj=1
 # describes some of the differences between FreeBSD sh and bash that one
 # might have to keep in mind when implementing classes with this framework.
 #
-# 12.1) POSIX
+# 13.1) POSIX
 #
 # The relatively strict POSIX conformance of dash is the reason that this
 # framework is not compatible to it. The specific reason why this framework
@@ -782,19 +817,19 @@ bsda_obj=1
 # function names as well, because the . and : builtin functions imply that
 # . and : are valid function names.
 #
-# 12.2) bash - local
+# 13.2) bash - local
 #
 # The local command of bash destroys the original variable values when
 # declaring a variable local. Most notably that broke scope checks.
 # A simple workaround was to move the local decleration behind the scope
 # checks in the code.
 #
-# 11.3) bash - setvar
+# 13.3) bash - setvar
 #
 # The bash doesn't have a setvar command. A hack was introduced to circumvent
 # this.
 #
-# 12.4) bash - Command Substitution Variable Scope
+# 13.4) bash - Command Substitution Variable Scope
 #
 # Variable changes inside command substition are lost outside the scope of the
 # substition, when using bash. The FreeBSD sh performs command substitution in
@@ -807,7 +842,7 @@ bsda_obj=1
 #	test=a
 #	echo $test$(test=b)$test
 #
-# 12.5) bash - alias
+# 13.5) bash - alias
 #
 # The alias command in bash, used for inheritance in the framework, only works
 # in interactive mode. Hence all uses of alias had to be substituted with
@@ -847,6 +882,12 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # needed by other programs like lockf(1).
 #
 readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $0${*:+ $*}\$,,1" -e 's,^\[,,' -e 's,]$,,')"
+
+#
+# The PID to use for creating new objects. When forking a session use the
+# bsda:obj:fork() function to update this value in the forked process.
+#
+bsda_obj_pid=$$
 
 #
 # This is used as a buffer during deep serialization.
@@ -1306,10 +1347,10 @@ bsda:obj:createClass() {
 
 			eval \"
 				# Create object reference.
-				this=\\\"${prefix}\$\$_\\\${${prefix}\$\$_nextId:-0}_\\\"
+				this=\\\"${prefix}\${bsda_obj_pid}_\\\${${prefix}\${bsda_obj_pid}_nextId:-0}_\\\"
 	
 				# Increase the object id counter.
-				${prefix}\$\$_nextId=\\\$((\\\$${prefix}\$\$_nextId + 1))
+				${prefix}\${bsda_obj_pid}_nextId=\\\$((\\\$${prefix}\${bsda_obj_pid}_nextId + 1))
 			\"
 
 			# Create method instances.
@@ -2097,6 +2138,36 @@ bsda:obj:callerSetvar() {
 	setvar $caller$1 "$2"
 	# Register variable.
 	eval "${caller}_setvars=\$${caller}_setvars\${${caller}_setvars:+ }$1"
+}
+
+#
+# This function can be used to update bsda_obj_pid in forked processes.
+#
+# This is necessary when both processes exchange objects (commonly in
+# serialized form) and thus need to be able to create objects with unique
+# IDs.
+#
+# The function should be called within the forked process without parameters
+# and with the $! parameter in the forking process, in the first line after
+# the fork.
+#
+# @param 1
+#	Should be set to the PID of the forked process.
+# @param bsda_obj_pid
+#	Is set to the new PID in the forked process.
+#
+bsda:obj:fork() {
+	# Check whether a PID was given.
+	if [ -z "$1" ]; then
+		# This is the forked process.
+		local pid
+		while ! pid="$(/usr/bin/nc -Ul /tmp/bsda_obj_fork_$bsda_obj_pid.sock 2> /dev/null)"; do true; done
+		/bin/rm /tmp/bsda_obj_fork_$bsda_obj_pid.sock
+		bsda_obj_pid=$pid
+	else
+		# This is the parent process.
+		while ! echo "$1" | /usr/bin/nc -U /tmp/bsda_obj_fork_$bsda_obj_pid.sock; do true; done
+	fi
 }
 
 #
