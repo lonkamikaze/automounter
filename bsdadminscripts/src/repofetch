@@ -25,7 +25,12 @@ readonly version=0.2
 readonly name=repofetch
 
 # Get the execution path.
+rundir="${0%${0##*/}}"
+#bsda_dir="%%DATADIR%%"
 bsda_dir="${0%${0##*/}}"
+
+#prefix="%%PREFIX%%"
+prefix="/usr/local"
 
 # Include framework for object oriented shell scripting.
 . ${bsda_dir:-.}/bsda_obj.sh
@@ -151,7 +156,7 @@ rf_init_params() {
 		case "$arg" in
 		-L | --uma-latest)
 			# Inject the UMA stuff into the parameters.
-			eval "$(uma env)"
+			eval "$($rundir/uma env)"
 			pkgsites="${PACKAGESITE%/*?}/Latest"
 			for pkgsite in $PACKAGESITE_MIRRORS; do
 				pkgsites="$pkgsites$IFS${pkgsite%/*?}/Latest"
@@ -160,7 +165,7 @@ rf_init_params() {
 		;;
 		-A | --uma-all)
 			# Inject the UMA stuff into the parameters.
-			eval "$(uma env)"
+			eval "$($rundir/uma env)"
 			pkgsites="${PACKAGESITE%/*?}/All"
 			for pkgsite in $PACKAGESITE_MIRRORS; do
 				pkgsites="$pkgsites$IFS${pkgsite%/*?}/All"

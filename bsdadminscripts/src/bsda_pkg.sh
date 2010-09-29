@@ -174,10 +174,10 @@ bsda:pkg:Index.search() {
 
 	$this.getIndex index
 	# The number of lines to search for.
-	length=$(echo "$3" | wc -l)
+	length=$(echo "$3" | /usr/bin/wc -l)
 
 	# Get the matching index lines.
-	lines="$(echo "
+	lines="$(/usr/bin/awk -F\| "
 		BEGIN {
 			# Initialize result counter.
 			count = 0
@@ -193,7 +193,7 @@ bsda:pkg:Index.search() {
 			if (++count == $length)
 				exit 0
 		}
-	" | awk -F\| -f - "$index")"
+	" "$index")"
 
 	# Return the matching index lines.
 	$caller.setvar "$1" "$lines"
@@ -477,8 +477,8 @@ bsda:pkg:Index.identifyNames() {
 #	This also prevents the blacklist from being updated.
 #
 bsda:pkg:Index.getPackagesByOrigins() {
-	local IFS packages origins origin pkg prefix index name newPackages
-	local lines line blacklist missing moved
+	local IFS packages origins origin pkg prefix name newPackages
+	local lines line blacklist missing
 
 	IFS='
 '
@@ -506,11 +506,6 @@ bsda:pkg:Index.getPackagesByOrigins() {
 		$caller.setvar "$1" "$packages"
 		return 0
 	fi
-
-	# Get the index file.
-	$this.getIndex index
-	# Get the Moved instances.
-	$this.getMoved moved
 
 	#
 	# Try to create new Package instances for the remaining origins.
@@ -552,7 +547,10 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	#
 	# Check the MOVED file for still missing packages.
 	#
-	local oldorigin neworigin
+	local moved oldorigin neworigin
+
+	# Get the Moved instances.
+	$this.getMoved moved
 
 	$moved.search lines $bsda_pkg_MOV_OLDORIGIN "$missing"
 	# Collect the available origins to remove from the
@@ -800,10 +798,14 @@ bsda:obj:createClass bsda:pkg:Package \
 		"The File instance this package was created from." \
 	r:private:line \
 		"The index line this package was created from." \
+	r:private:replace \
+		"A list of names of packages to replace." \
 	i:protected:init \
 		"The constructor, initializes all the attributes." \
 	x:public:getDependencies \
 		"Returns the indexed dependencies of the Package." \
+	x:public:addReplace \
+		"Add a packages to replace." \
 
 #
 # The constructor initializes all the attributes.
@@ -878,6 +880,23 @@ bsda:pkg:Package.getDependencies() {
 }
 
 #
+# Add the origins of packages to be replaced with this package.
+#
+# @param @
+#	The package origins to replace.
+#
+bsda:pkg:Package.addReplace() {
+	local IFS replace name
+	IFS='
+'
+	$this.getReplace replace
+	for name in "$@"; do
+		replace="${replace:+$replace$IFS}$name"
+	done
+	setvar ${this}replace "$replace"
+}
+
+#
 # Instances of this class represent a MOVED file.
 #
 bsda:obj:createClass bsda:pkg:Moved \
@@ -924,7 +943,7 @@ bsda:pkg:Moved.search() {
 	$this.getMoved moved
 
 	# Get the matching lines/columns from the MOVED file.
-	lines="$(awk -F\| "
+	lines="$(/usr/bin/awk -F\| "
 		BEGIN {
 			# Create an array with the requested strings as
 			# indices.

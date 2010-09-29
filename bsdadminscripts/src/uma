@@ -32,11 +32,13 @@ trap '' int
 # Used to activate verbose output.
 verbose=
 
-readonly vardir="%%VAR%%"
+#readonly vardir="%%VAR%%"
+readonly vardir="/var"
 readonly lock="$vardir/run/$name.lock"
 readonly lockpid="$vardir/run/$name.pid"
 readonly identpid="$vardir/run/$name.ident.pid"
-readonly conf="%%PREFIX%%/etc/$name.conf"
+#readonly conf="%%PREFIX%%/etc/$name.conf"
+readonly conf="/usr/local/etc/$name.conf"
 
 # Use line breaks as a delimiter.
 IFS='
@@ -73,7 +75,7 @@ fi
 
 # Logic from src/usr.sbin/pkg_install/add/main.c, plus the possibility to
 # override the architecture with ARCH.
-: ${PACKAGEROOT="ftp://ftp.freebsd.org"}
+: ${PACKAGEROOT="http://ftp.freebsd.org"}
 : ${ARCH="$(uname -m)"}
 branch="$(uname -r | tr '[:upper:]' '[:lower:]')"
 number="${branch%%-*}"
@@ -105,7 +107,7 @@ packagetree="${PACKAGESITE%/*?}"
 if [ -z "$PACKAGEROOT_MIRRORS" ]; then
 	PACKAGEROOT_MIRRORS=
 	for i in $(jot 14); {
-		PACKAGEROOT_MIRRORS="${PACKAGEROOT_MIRRORS:+$PACKAGEROOT_MIRRORS$IFS}ftp://ftp$i.FreeBSD.org"
+		PACKAGEROOT_MIRRORS="${PACKAGEROOT_MIRRORS:+$PACKAGEROOT_MIRRORS$IFS}http://ftp$i.FreeBSD.org"
 	}
 fi
 
