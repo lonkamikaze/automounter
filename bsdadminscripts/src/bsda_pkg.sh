@@ -40,13 +40,20 @@ readonly bsda_pkg_ERR_PACKAGE_ORIGIN_UNINDEXED=3
 readonly bsda_pkg_ERR_PACKAGE_NAME_UNMATCHED=4
 readonly bsda_pkg_ERR_PACKAGE_NAME_UNINDEXED=5
 readonly bsda_pkg_ERR_PACKAGE_NAME_AMBIGUOUS=6
+readonly bsda_pkg_ERR_PACKAGE_NEW_ORIGIN_AMBIGUOUS=7
+readonly bsda_pkg_ERR_PACKAGE_NEW_NAME_AMBIGUOUS=8
+readonly bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_AMBIGUOUS=9
+readonly bsda_pkg_ERR_PACKAGE_OLD_NAME_AMBIGUOUS=10
+readonly bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED=11
+readonly bsda_pkg_ERR_PACKAGE_OLD_NAME_UNMATCHED=12
+readonly bsda_pkg_ERR_PACKAGE_OLD_CONFLICT=13
 
 # Index exceptions.
-readonly bsda_pkg_ERR_INDEX_FILE_MISSING=7
-readonly bsda_pkg_ERR_INDEX_MOVED_MISSING=8
+readonly bsda_pkg_ERR_INDEX_FILE_MISSING=14
+readonly bsda_pkg_ERR_INDEX_MOVED_MISSING=15
 
 # Moved exceptions.
-readonly bsda_pkg_ERR_MOVED_FILE_MISSING=9
+readonly bsda_pkg_ERR_MOVED_FILE_MISSING=16
 
 # INDEX columns.
 readonly bsda_pkg_IDX_PKG=1
@@ -90,7 +97,7 @@ bsda_pkg_errno=0
 # source of information about packages.
 #
 # By calling identifyPackages with a package file, the file can be built
-# into the index representation. This indexed and unindexed packages can
+# into the index representation. This way indexed and unindexed packages can
 # be handled through a single interface.
 #
 bsda:obj:createClass bsda:pkg:Index \
@@ -103,7 +110,7 @@ bsda:obj:createClass bsda:pkg:Index \
 	r:private:packages \
 		"The packages already read from the index." \
 	r:private:mappedPackages \
-		"The same list as packages only mapped by package origin" \
+		"The same list of packages only mapped by package origin" \
 		"in the format: |<origin>|<Package>" \
 	r:private:originBlacklist \
 		"A list of unavailable encountered origins." \
@@ -113,6 +120,9 @@ bsda:obj:createClass bsda:pkg:Index \
 		"Returns index lines matching a given string and column." \
 	x:public:identifyPackages \
 		"Returns a list of packages by a given glob pattern." \
+	x:public:substitutePackage \
+		"Takes two package identifiers and returns a package for the" \
+		"first one, setting everything up to replace the second one." \
 	x:private:identifyOrigins \
 		"Returns a list of packages from an origin glob pattern." \
 	x:private:identifyNames \
@@ -251,8 +261,6 @@ bsda:pkg:Index.identifyPackages() {
 			# Remove the origin from the blacklist.
 			setvar ${this}originBlacklist "$($this.getOriginBlacklist | grep -vFx "$origin")"
 		else
-			# Reset the matching package.
-			$pkg.reset
 			# Repopulate the package with the new data.
 			$pkg.init "$origin" "$name" $file
 		fi
@@ -288,6 +296,162 @@ bsda:pkg:Index.identifyPackages() {
 			return 0
 		;;
 	esac
+}
+
+#
+# Returns a new package in such a way that it will substitute an old package
+# upon install.
+#
+# For this to work it is important that the old package is not already present
+# and thus all substitutePackage() calls should occur before the first call
+# of identifyPackages().
+#
+# For the new packag the same matching rules apply as for everything
+# returned by identifyPackages. An additional limitation is that the new
+# package needs to be unambiguous, i.e. whatever was specified should match
+# a single package.
+#
+# The old package is more limited, it should unambiguously match an installed
+# package. Glob patterns are permitted as long as they only match a single
+# installed package.
+#
+# @param &1
+#	The name of the variable to return the new package to.
+# @param 2
+#	The new package.
+# @param 3
+#	An identifier for an already existing package.
+# @throws bsda_pkg_ERR_PACKAGE_CONTENTS_FORMAT
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_ORIGIN_UNMATCHED
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_ORIGIN_UNINDEXED
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_NAME_UNMATCHED
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_NAME_AMBIGUOUS
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_NAME_UNINDEXED
+#	Forwarded from identifyPackages(), always because of the new package.
+# @throws bsda_pkg_ERR_PACKAGE_NEW_ORIGIN_AMBIGUOUS
+#	Thrown if the new package was given as an ambiguous origin glob.
+# @throws bsda_pkg_ERR_PACKAGE_NEW_NAME_AMBIGUOUS
+#	Thrown if the new package was given as an ambiguous package name glob.
+# @throws bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_AMBIGUOUS
+#	Thrown if the old package was given as an ambiguous origin glob.
+# @throws bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED
+#	Thrown if the old package was given as an origin not matching any
+#	installed package.
+# @throws bsda_pkg_ERR_PACKAGE_OLD_NAME_UNMATCHED
+#	Thrown if the old package was given as a package name not matching
+#	any installed package.
+# @throws bsda_pkg_ERR_PACKAGE_OLD_NAME_AMBIGUOUS
+#	Thrown if the old package was given as an ambiguous name. This can
+#	happen if old package was defined as a name glob or in LATEST_LINK
+#	style matching more than one installed package.
+# @throws bsda_pkg_ERR_PACKAGE_OLD_CONFLICT
+#	This is thrown if the old package was previously returned from the
+#	index and thus a Package instance resembling it already exists.
+#	This is not accepted, because it can lead to conflicts when packages
+#	are installed.
+#
+bsda:pkg:Index.substitutePackage() {
+	local IFS newPkg origin known missing mapped
+
+	IFS='
+'
+
+	#
+	# Try to get the new package.
+	#
+	if ! $this.identifyPackages newPkg "$2"; then
+		# Forward errors.
+		$caller.setvar "$1"
+		return 1
+	fi
+
+	# There must be a single package identified.
+	if [ $(echo "$newPkg" | /usr/bin/wc -l) -gt 1 ]; then
+		case "$2" in
+		*/*)
+			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_NEW_ORIGIN_AMBIGUOUS
+		;;
+		*)
+			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_NEW_NAME_AMBIGUOUS
+		;;
+		esac
+		$caller.setvar "$1"
+		return 1
+	fi
+
+	#
+	# Try to get the old package origin.
+	#
+	origin=
+	case "$3" in
+	*/*)
+		origin="$(/usr/sbin/pkg_info -qo $(/usr/sbin/pkg_info -qO "$3") 2> /dev/null)"
+		# Check for ambiguous matches.
+		if [ $(echo "$origin" | /usr/bin/wc -l) -gt 1 ]; then
+			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_AMBIGUOUS
+			$caller.setvar "$1"
+			return 1
+		fi
+		# Check for not matching origins.
+		if [ -z "$origin" ]; then
+			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED
+			$caller.setvar "$1"
+			return 1
+		fi
+	;;
+	*)
+		origin="$(/usr/sbin/pkg_info -qo "$3" 2> /dev/null)"
+		# Check whether there were any matches.
+		if [ -z "$origin" ]; then
+			# No matches were there, try to find something
+			# assuming LATEST_LINK style name.
+			origin="$(/usr/sbin/pkg_info -qo "$3-*" 2> /dev/null)"
+			if [ -z "$origin" ]; then
+				bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_NAME_UNMATCHED
+				$caller.setvar "$1"
+				return 1
+			fi
+		fi
+		# Check for ambiguous matches.
+		if [ $(echo "$origin" | /usr/bin/wc -l) -gt 1 ]; then
+			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_NAME_AMBIGUOUS
+			$caller.setvar "$1"
+			return 1
+		fi
+	;;
+	esac
+
+	#
+	# The old package must be unknown as of now, or there might be
+	# conflicts when installing packages.
+	#
+	$this.getKnownPackages known missing "$origin"
+	if [ -n "$known" ]; then
+		# The old package is already known, bail out now.
+		bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_CONFLICT
+		$caller.setvar "$1"
+		return 1
+	fi
+
+	#
+	# Wrap the new package up.
+	#
+	
+	# Set up package mapping.
+	$this.getMappedPackages mapped
+	setvar ${this}mappedPackages "${mapped:+$mapped$IFS}|$origin|$newPkg"
+
+	# Tell the package it is replacing another one.
+	$newPkg.addMoved "$origin"
+
+	# Return the new package.
+	$caller.setvar "$1" $newPkg
+	return 0
 }
 
 #
@@ -465,7 +629,7 @@ bsda:pkg:Index.identifyNames() {
 }
 
 #
-# Takes a list of origins and returns a list of Package instance. If the
+# Takes a list of origins and returns a list of Package instances. If the
 # Package is not known, it is created from the index.
 #
 # @param 1
@@ -797,12 +961,12 @@ bsda:obj:createClass bsda:pkg:Package \
 		"The package origin." \
 	r:public:name \
 		"The package name." \
+	r:public:moved \
+		"A list of package orgins moved to this package." \
 	r:private:file \
 		"The File instance this package was created from." \
 	r:private:line \
 		"The index line this package was created from." \
-	r:private:moved \
-		"A list of package orgins moved to this package." \
 	i:protected:init \
 		"The constructor, initializes all the attributes." \
 	x:public:getDependencies \
@@ -837,8 +1001,10 @@ bsda:pkg:Package.init() {
 	# Set file or index line as source.
 	if bsda:pkg:File.isInstance "$4"; then
 		setvar ${this}file "$4"
+		setvar ${this}line
 	else
 		setvar ${this}line "$4"
+		setvar ${this}file
 	fi
 }
 
