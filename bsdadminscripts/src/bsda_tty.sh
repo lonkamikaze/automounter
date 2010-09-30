@@ -390,7 +390,7 @@ bsda:obj:createInterface bsda:tty:StatusProvider \
 		"Is called if the status provider gets disconnected." \
 
 #
-# Represents a terminal to controll output on stdout, stderr and status lines.
+# Represents a terminal to control output on stdout, stderr and status lines.
 #
 # An instance can be deactivated, in which case status messages are discarded.
 #

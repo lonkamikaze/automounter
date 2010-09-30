@@ -25,9 +25,11 @@ readonly version=0.2
 readonly name=repofetch
 
 # Get the execution path.
-rundir="${0%${0##*/}}"
-#bsda_dir="%%DATADIR%%"
-bsda_dir="${0%${0##*/}}"
+rundir="${0%/${0##*/}}"
+bsda_dir="%%DATADIR%%"
+#HACK
+bsda_dir="${0%/${0##*/}}"
+#hack
 
 #prefix="%%PREFIX%%"
 prefix="/usr/local"
