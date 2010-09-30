@@ -230,22 +230,22 @@ lock() {
 	hasLock && return 0
 
 	# The process requesting the lock does not exist.
-	/bin/kill -0 "$pid" 2> /dev/null || return 1 $(errno=1)
+	/bin/kill -0 "$pid" 2> /dev/null || return 1 $(errno=$((1 << ERR_LOCK)))
 
 	# Follow symlinks
 	location="$(pwd)"
 	if cd "$portsdir" 2> /dev/null && portsdir="$(pwd -P)"; then
 		# Portsdir exists, so we should test for make activity. This
 		# does not cover all cases, but it covers a lot.
-		if /usr/bin/fstat -u "$USER" | /usr/bin/awk '{print $2}' | /usr/bin/grep -q make; then
-			errno=1
+		if /usr/bin/fstat -u "$USER" | /usr/bin/awk '{print $2}' | /usr/bin/grep -Fq make; then
+			errno=$((1 << ERR_LOCK))
 			return 1
 		fi
 	fi
 	cd "$location"
 
 	# Try acquiring the lock.
-	/usr/bin/lockf -st 0 "$lock" "$0" secure $pid 2> /dev/null || return 1 $(errno=1)
+	/usr/bin/lockf -st 0 "$lock" "$0" secure $pid 2> /dev/null || return 1 $(errno=$((1 << ERR_LOCK)))
 	# Wait until the locking process is properly set up.
 	while ! [ -e "$lockpid" -a -e "$lock" ]; do
 		sleep 0.1
@@ -273,7 +273,7 @@ unlock() {
 		done
 		return 0
 	else
-		errno=1
+		errno=$((1 << ERR_LOCK | errno))
 		return 1
 	fi
 }

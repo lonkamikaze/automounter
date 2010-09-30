@@ -25,17 +25,14 @@ version=1.9
 name=pkg_upgrade
 
 # The path to run executables belonging to bsdadminscripts from.
-rundir="${0%${0##*/}}"
+rundir="${0%/${0##*/}}"
 # The system prefix.
 prefix="%%PREFIX%%"
-# The var location.
-var="%%VAR%%"
 # Default include path.
 bsda_dir="%%DATADIR%%"
 #HACK
 prefix="/usr/local"
-var="/var"
-bsda_dir="${0%${0##*/}}"
+bsda_dir="${0%/${0##*/}}"
 #hack
 # The configuration file.
 conf="$prefix/etc/$name.conf"
@@ -48,6 +45,22 @@ eval "$($rundir/uma env $$ | /usr/bin/sed -E "s/^([[:alnum:]_]+=')/export \1/1")
 if [ -e "$conf" ]; then
 	. "$conf"
 fi
+
+#
+# Set sane environment defaults.
+#
+: ${PKG_BACKUP_SUFX=.tbz}
+: ${RUNDIR=$rundir}
+
+# Make sure environment variables turn up in the environment.
+export PKG_BACKUP_SUFX
+
+#
+# Load libraries.
+#
+
+# Include object oriented framework.
+. "${bsda_dir:-.}/bsda_obj.sh"
 
 # Include terminal control library.
 . "${bsda_dir:-.}/bsda_tty.sh"
@@ -78,6 +91,7 @@ readonly pu_FLAG_UPWARD_RECURSIVE=$((1 << 13))
 readonly pu_FLAG_UPWARD_RECURSIVE2=$((1 << 14))
 readonly pu_FLAG_VERBOSE=$((1 << 15))
 readonly pu_FLAG_EXIT_ON_CONFLICT=$((1 << 16))
+readonly pu_FLAG_KEEP_INDEX=$((1 << 17))
 
 #
 # Available errors.
@@ -108,17 +122,31 @@ readonly pu_ERR_CONFLICT=12
 readonly pu_ERR_str_12=ERR_CONFLICT
 
 #
+# Holds the current error state, one of pu_ERR_* or 0.
+#
+pu_errno=0
+
+#
 # A terminal object for this session.
 #
-bsda:tty:Terminal terminal
+bsda:tty:Terminal pu_terminal
 # Trap this, just for starters until the Session object takes over.
-trap "$terminal.delete" EXIT
+trap "$pu_terminal.delete" EXIT
 
 #
 # Parses the command line parameters.
 #
+# @param @
+#	The parameters to parse.
+# @param pu_errno
+#	Error state keeping variable.
+# @param pu_terminal
+#	The current terminal.
+# @return
+#	Returns true (0) or false (1) in case of failure.
+#
 pu_params() {
-	local IFS arg pkgPatterns pkgReplace flags errors
+	local IFS arg pkgPatterns pkgReplace flags errors resume
 
 	IFS='
 '
@@ -131,6 +159,8 @@ pu_params() {
 	flags=0
 	# A list of error messages.
 	errors=
+	# Resume is a special case.
+	resume=
 
 	while [ $# -gt 0 ]; do
 		arg="$1"
@@ -196,6 +226,16 @@ pu_params() {
 			fi
 			flags=$((flags | pu_FLAG_HELP))
 		;;
+		-k | --keep-index)
+			if  [ $((flags & pu_FLAG_KEEP_INDEX)) -ne 0 ]; then
+				if [ -n "$resume" ]; then
+					errors="${errors:+$errors$IFS}$arg The keep index flag is already implied by the resume flag."
+				else
+					errors="${errors:+$errors$IFS}$arg The INDEX/MOVED/UPDATING files can only be kept once."
+				fi
+			fi
+			flags=$((flags | pu_FLAG_KEEP_INDEX))
+		;;
 		-l | --no-logging)
 			if  [ $((flags & pu_FLAG_NO_LOGGING)) -ne 0 ]; then
 				errors="${errors:+$errors$IFS}$arg Logging can only be turned off once."
@@ -251,6 +291,21 @@ pu_params() {
 			fi
 			flags=$((flags | pu_FLAG_UPWARD_RECURSIVE))
 		;;
+		-s | --resume)
+			if [ -z "$1" ]; then
+				errors="${errors:+$errors$IFS}$arg The resume flag expects a session identifier to resume."
+			fi
+			if [ -n "$resume" ]; then
+				errors="${errors:+$errors$IFS}$arg Only one session can be resumed at a time."
+			else
+				if  [ $((flags & pu_FLAG_KEEP_INDEX)) -ne 0 ]; then
+					errors="${errors:+$errors$IFS}$arg The keep index flag is given, even though the resume flag implies it."
+				fi
+			fi
+			flags=$((flags | pu_FLAG_KEEP_INDEX))
+			resume="$1"
+			shift
+		;;
 		-v | --verbose)
 			if  [ $((flags & pu_FLAG_VERBOSE)) -ne 0 ]; then
 				errors="${errors:+$errors$IFS}$arg Cannot be double verbose."
@@ -266,11 +321,11 @@ pu_params() {
 			fi
 			flags=$((flags | pu_FLAG_EXIT_ON_CONFLICT))
 		;;
-		--orgin=*)
+		--orgin=* | --resume=*)
 			# Split long flags that expect parameters.
 			set -- "${arg%%=*}" "${arg#*=}" "$@"
 		;;
-		-o*)
+		-o* | -s*)
 			# Split short flags that expect parameters.
 			set -- "${arg%%${arg#-?}}" "${arg#-?}" "$@"
 		;;
@@ -296,6 +351,7 @@ pu_params() {
 	# Perform final parameter logic checks that cannot be performed on the
 	# fly without enforcing a certain order of parameters.
 	#
+	# TODO Might become obsolete because of depending packages reinstall
 	if [ $((flags & pu_FLAG_RECURSIVE2)) -ne 0 -a $((flags & pu_FLAG_UPWARD_RECURSIVE)) -eq 0 ]; then
 		errors="${errors:+$errors$IFS}Thorough recursiveness can only be used in conjunction with upwards recursiveness."
 	fi
@@ -304,8 +360,13 @@ pu_params() {
 	# If errors occoured, print them and bail out.
 	#
 	if [ -n "$errors" ]; then
-		echo "$errors" | /usr/bin/sed "s,^,ERROR(ERR_ARG=$pu_ERR_ARG): ," | $terminal.stderr
-		return $pu_ERR_ARG
+		echo "$errors" | /usr/bin/sed "s,^,ERROR(ERR_ARG=$pu_ERR_ARG): ," | $pu_terminal.stderr
+		pu_errno=$PU_ERR_ARG
+		return 1
+	fi
+
+	if pu:Session session $flags "$pkgPatterns" "$pkgReplace" $pu_terminal; then
+		$session.delete
 	fi
 }
 
@@ -317,6 +378,10 @@ pu_params() {
 #
 bsda:obj:createClass pu:Session \
 	implements:bsda:scheduler:Process \
+	w:private:signal \
+		"Is set to a signal if one was trapped." \
+	w:private:flags \
+		"The configuration flags." \
 	w:private:terminal \
 		"The Terminal object for this session." \
 	w:private:index \
@@ -325,6 +390,130 @@ bsda:obj:createClass pu:Session \
 		"The Moved object for a session." \
 	i:private:init \
 		"The constructor initializes a session." \
+	c:private:clean \
+		"The destructor cleans up the session." \
+	x:private:setupSignals \
+		"Setup signal trapping." \
+	x:private:setupTerminal \
+		"Updates the terminal to use." \
+	x:private:setupLock \
+		"Creates an UMA lock." \
+	x:private:setupIndex \
+		"Updates the index." \
+	x:private:error \
+		"Outputs an error message and sets pu_errno." \
+	x:private:warn \
+		"Outputs a warning." \
+	x:private:uma \
+		"Calls UMA with the given parameters." \
+
+#
+# @param 1
+#	The flags for this session, a bitfield to read and write with the
+#	pu_FLAG_* bits.
+# @param 2
+#	A list of explicite package matching patterns for install/reinstall.
+# @param 3
+#	The package replace instructions.
+# @param 4
+#	The terminal to use.
+#
+pu:Session.init() {
+	$this.setFlags $1
+	$this.setupTerminal $4
+	$this.setupSignals
+	$this.setupLock || return
+	$this.setupIndex || return
+}
+
+pu:Session.clean() {
+	local terminal
+	$this.uma unlock
+	$this.getTerminal terminal
+	$terminal.delete
+}
+
+pu:Session.setupSignals() {
+	trap "${this}signal=HUP" hup
+	trap "${this}signal=INT" int
+	trap "${this}signal=TERM" term
+	trap - EXIT
+}
+
+pu:Session.setupTerminal() {
+	local flags
+	$this.getFlags flags
+	$this.setTerminal $1
+
+	# Turn off all the fancy terminal features if clean output was
+	# requested.
+	if [ $((flags & pu_FLAG_CLEAN)) -ne 0 ]; then
+		$1.deactivate
+	fi
+}
+
+pu:Session.setupLock() {
+	if ! $this.uma lock; then
+		local gid
+		gid="$(/usr/sbin/pw show user "$USER" | /usr/bin/cut -d: -f4)"
+		if [ $gid -ne 0 ]; then
+			$this.error $pu_ERR_LOCK "The command requires super user privileges."
+		else
+			$this.error $pu_ERR_LOCK "The uma (Update MAnager) lock could not be acquired, it appears the package/ports infrastructure is in use or there is make activity from the root user."
+		fi
+		return 1
+	fi
+}
+
+pu:Session.setupIndex() {
+	local flags index moved
+	$this.getFlags flags
+
+	# Check whether a keep index is requested.
+	if [ $((flags & pu_FLAG_KEEP_INDEX)) -eq 0 ]; then
+		# Try getting a new index.
+		if ! $this.uma fetch ftpindex; then
+			$this.error $pu_ERR_INDEX "Acquiring an up to date INDEX/MOVED/UPDATING failed."
+			return 1
+		fi
+	else
+		# Keeping the index was requested, check whether there is one.
+		if [ ! -r "$PKG_INDEX" ]; then
+			$this.error $pu_ERR_INDEX "Cannot read INDEX file at '$PKG_INDEX'."
+			return 1
+		fi
+		if [ ! -r "$PKG_MOVED" ]; then
+			$this.error $pu_ERR_INDEX "Cannot read MOVED file at '$PKG_MOVED'."
+			return 1
+		fi
+	fi
+	bsda:pkg:Moved moved "$PKG_MOVED"
+	bsda:pkg:Index index "$PKG_INDEX" $moved
+	$this.setMoved $moved
+	$this.setIndex $index
+}
+
+#
+# @param 1
+#	The error number as defined in the pu_ERR_* constants.
+# @param 2
+#	The error message.
+#
+pu:Session.error() {
+	pu_errno=$1
+	eval "\$${this}terminal.stderr \"ERROR(\$pu_ERR_str_$1=$1): $2\""
+}
+
+#
+# Calls UMA with the current PID.
+#
+# @param @
+#	The parameters to pass on to uma.
+#
+pu:Session.uma() {
+	$RUNDIR/uma $bsda_obj_pid "$@"
+}
 
 pu_params "$@"
+return $pu_errno
 

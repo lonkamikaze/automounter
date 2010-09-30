@@ -580,6 +580,9 @@ bsda:pkg:Index.getPackagesByOrigins() {
 			continue
 		fi
 
+		# Tell the package that it was MOVED.
+		$pkg.addMoved "$oldorigin"
+
 		# There actually is a package, remember it.
 		packages="$packages${packages:+$IFS}$pkg"
 		# Create an alias with the old origin.
@@ -798,14 +801,14 @@ bsda:obj:createClass bsda:pkg:Package \
 		"The File instance this package was created from." \
 	r:private:line \
 		"The index line this package was created from." \
-	r:private:replace \
-		"A list of names of packages to replace." \
+	r:private:moved \
+		"A list of package orgins moved to this package." \
 	i:protected:init \
 		"The constructor, initializes all the attributes." \
 	x:public:getDependencies \
 		"Returns the indexed dependencies of the Package." \
-	x:public:addReplace \
-		"Add a packages to replace." \
+	x:public:addMoved \
+		"Tell the package that it was moved from another origin." \
 
 #
 # The constructor initializes all the attributes.
@@ -885,15 +888,15 @@ bsda:pkg:Package.getDependencies() {
 # @param @
 #	The package origins to replace.
 #
-bsda:pkg:Package.addReplace() {
-	local IFS replace name
+bsda:pkg:Package.addMoved() {
+	local IFS moved origin
 	IFS='
 '
-	$this.getReplace replace
-	for name in "$@"; do
-		replace="${replace:+$replace$IFS}$name"
+	$this.getMoved moved
+	for origin in "$@"; do
+		moved="${moved:+$moved$IFS}$origin"
 	done
-	setvar ${this}replace "$replace"
+	setvar ${this}moved "$moved"
 }
 
 #
