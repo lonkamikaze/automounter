@@ -388,6 +388,10 @@ bsda:obj:createClass pu:Session \
 		"The Index object for this session." \
 	w:private:moved \
 		"The Moved object for a session." \
+	w:private:packages \
+		"A list of bsda:pkg:Package instances to process." \
+	r:public:errno \
+		"The current error state of the session." \
 	i:private:init \
 		"The constructor initializes a session." \
 	c:private:clean \
@@ -400,10 +404,14 @@ bsda:obj:createClass pu:Session \
 		"Creates an UMA lock." \
 	x:private:setupIndex \
 		"Updates the index." \
+	x:private:setupPkgs \
+		"Setup the packages list." \
 	x:private:error \
 		"Outputs an error message and sets pu_errno." \
 	x:private:warn \
 		"Outputs a warning." \
+	x:private:verbose \
+		"Produce verbose output." \
 	x:private:uma \
 		"Calls UMA with the given parameters." \
 
@@ -419,11 +427,13 @@ bsda:obj:createClass pu:Session \
 #	The terminal to use.
 #
 pu:Session.init() {
+	setvar ${this}errno 0
 	$this.setFlags $1
 	$this.setupTerminal $4
 	$this.setupSignals
 	$this.setupLock || return
 	$this.setupIndex || return
+	$this.setupPkgs "$3" "$2" || return
 }
 
 pu:Session.clean() {
@@ -453,6 +463,7 @@ pu:Session.setupTerminal() {
 }
 
 pu:Session.setupLock() {
+	$this.verbose 'Acquiring an exclusive lock on the package database.'
 	if ! $this.uma lock; then
 		local gid
 		gid="$(/usr/sbin/pw show user "$USER" | /usr/bin/cut -d: -f4)"
@@ -467,9 +478,11 @@ pu:Session.setupLock() {
 
 pu:Session.setupIndex() {
 	local flags index moved
-	$this.getFlags flags
+
+	$this.verbose 'Opening the package INDEX for reading.'
 
 	# Check whether a keep index is requested.
+	$this.getFlags flags
 	if [ $((flags & pu_FLAG_KEEP_INDEX)) -eq 0 ]; then
 		# Try getting a new index.
 		if ! $this.uma fetch ftpindex; then
@@ -495,13 +508,135 @@ pu:Session.setupIndex() {
 
 #
 # @param 1
+#	A list of package replace patterns in the form:
+#		<new>|<old>
+# @param 2
+#	A list of package patterns to update/install/reinstall.
+#
+pu:Session.setupPkgs() {
+	local IFS index packages substitution pattern pkg pkgs old new msg errno
+
+	$this.verbose 'Parsing update, (re)install and replace instructions.'
+	IFS='
+'
+
+	# The list of packages to work on.
+	packages=
+	$this.getIndex index
+	# Get the substitution packages.
+	for substitution in $1; do
+		# Try to get the substitution package from the index.
+		if $index.substitutePackage pkg "${substitution%%|*}" "${substitution#*|}"; then
+			packages="${packages:+$packages$IFS}$pkg"
+		else
+			old="${substitution#*|}"
+			new="${substitution%%|*}"
+			msg="Replacing '$old' with '$new' failed"
+			case $bsda_pkg_errno in
+			$bsda_pkg_ERR_PACKAGE_CONTENTS_FORMAT)
+				$this.error $pu_ERR_PACKAGE_FORMAT "$msg, because the CONTENTS format of '$new' is not understood."
+			;;
+			$bsda_pkg_ERR_PACKAGE_ORIGIN_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the origin glob '$new' does not match an installed package that is indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_ORIGIN_UNINDEXED)
+				$this.error $pu_ERR_ARG "$msg, because the origin '$new' is not indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the package name glob '$new' does not match an installed package that is indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because the package name '$new' matches more than one indexed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_UNINDEXED)
+				$this.error $pu_ERR_ARG "$msg, because the package name '$new' does not match an indexed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NEW_ORIGIN_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because the origin glob '$new' matches more than one installed and indexed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NEW_NAME_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because package name glob '$new' matches more than one installed and indexed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because the origin glob '$old' matches more than one installed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the origin '$old' does not match an installed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_OLD_NAME_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the package name '$old' does not match an installed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_OLD_NAME_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because the package name glob '$old' matches more than one installed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_OLD_CONFLICT)
+				$this.error $pu_ERR_ARG "$msg, because replacing '$old' conflicts with other specified package operations."
+			;;
+			esac
+			# Continue for the time being.
+			bsda_pkg_errno=0
+		fi
+	done
+
+	# Get the regular update/install/reinstall requests.
+	for pattern in $2; do
+		# Try to get the packages from the index.
+		if $index.identifyPackages pkgs "$pattern"; then
+			packages="${packages:+$packages$IFS}$pkg"
+		else
+			msg="Updating or (re)installing '$pattern' failed"
+			case $bsda_pkg_errno in
+			$bsda_pkg_ERR_PACKAGE_CONTENTS_FORMAT)
+				$this.error $pu_ERR_PACKAGE_FORMAT "$msg, because the CONTENTS format of '$pattern' is not understood."
+			;;
+			$bsda_pkg_ERR_PACKAGE_ORIGIN_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the origin glob '$pattern' does not match an installed package that is indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_ORIGIN_UNINDEXED)
+				$this.error $pu_ERR_ARG "$msg, because the origin '$pattern' is not indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_UNMATCHED)
+				$this.error $pu_ERR_ARG "$msg, because the package name glob '$pattern' does not match an installed package that is indexed."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_AMBIGUOUS)
+				$this.error $pu_ERR_ARG "$msg, because the package name '$pattern' matches more than one indexed package."
+			;;
+			$bsda_pkg_ERR_PACKAGE_NAME_UNINDEXED)
+				$this.error $pu_ERR_ARG "$msg, because the package name '$pattern' does not match an indexed package."
+			;;
+			esac
+		fi
+	done
+
+	# Remove duplicates.
+	packages="$(echo "$packages" | /usr/bin/sort -u)"
+	# Store the packages to explicitely update or (re)install.
+	$this.setPackages "$packages"
+
+	# Return false if an error occured.
+	$this.getErrno errno
+	test $errno -eq 0
+}
+
+#
+# @param 1
 #	The error number as defined in the pu_ERR_* constants.
 # @param 2
 #	The error message.
 #
 pu:Session.error() {
-	pu_errno=$1
-	eval "\$${this}terminal.stderr \"ERROR(\$pu_ERR_str_$1=$1): $2\""
+	eval "
+	test \$${this}errno -eq 0 && ${this}errno=$1
+	\$${this}terminal.stderr \"ERROR(\$pu_ERR_str_$1=$1): $2\"
+	"
+}
+
+pu:Session.verbose() {
+	eval "
+	if [ \$((${this}flags & pu_FLAG_VERBOSE)) -ne 0 ]; then
+		\$${this}terminal.stdout \"$1\"
+	fi
+	"
 }
 
 #
