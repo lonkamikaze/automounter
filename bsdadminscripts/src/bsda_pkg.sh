@@ -127,9 +127,9 @@ bsda:obj:createClass bsda:pkg:Index \
 		"Returns a list of packages from an origin glob pattern." \
 	x:private:identifyNames \
 		"Returns a list of packages from a package name glob pattern." \
-	x:protected:getPackagesByOrigins \
+	x:public:getPackagesByOrigins \
 		"Takes a list of origins and returns a list of Packages." \
-	x:protected:getPackagesByNames \
+	x:public:getPackagesByNames \
 		"Takes a list of package names and returns" \
 		"a list of Packages." \
 	x:private:addPackages \
@@ -973,6 +973,12 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Returns the indexed dependencies of the Package." \
 	x:public:addMoved \
 		"Tell the package that it was moved from another origin." \
+	x:public:isUpdate \
+		"Check whether this is an update to an installed package." \
+	x:public:isReinstall \
+		"Check whether this is a reinstall without version changes." \
+	x:public:isInstalled \
+		"Check whether a version of this package is installed." \
 
 #
 # The constructor initializes all the attributes.
@@ -1022,6 +1028,7 @@ bsda:pkg:Package.getDependencies() {
 
 	# Check whether the buffer is already filled.
 	if eval "test \"\$${this}dependencies\" = 'null'"; then
+		echo FIRST
 		# The buffer needs filling.
 
 		# Check whether a package file is available.
@@ -1036,7 +1043,7 @@ bsda:pkg:Package.getDependencies() {
 		else
 			# A package file is not available, use the index line.
 			$this.getLine line
-			dependencies="$(echo "$line" | cut -d\| -f$bsda_pkg_IDX_DEPENDS | rs 0 1)"
+			dependencies="$(echo "$line" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_DEPENDS | /usr/bin/rs 0 1)"
 			eval "$index.getPackagesByNames ${this}dependencies \"$dependencies\""
 	
 			# The index line is no longer needed and just wastes memory.
@@ -1063,6 +1070,70 @@ bsda:pkg:Package.addMoved() {
 		moved="${moved:+$moved$IFS}$origin"
 	done
 	setvar ${this}moved "$moved"
+}
+
+#
+# Returns if this is an update to an installed package.
+#
+# @return
+#	True (0) if this is an update, else false (1).
+#
+bsda:pkg:Package.isUpdate() {
+	local IFS origins origin name installedName
+
+	IFS='
+'
+	$this.getName name
+	$this.getOrigin origin
+
+	# This is only an update if there is an already installed package,
+	# with a version number less than this one's.
+	installedName="$(/usr/sbin/pkg_info -qO "$origin")"
+	if [ -n "$installedName" ] && [ "$(/usr/sbin/pkg_version -t "$installedName" "$name")" = "<" ]; then
+		return 0
+	fi
+
+	# If the package got moved from something already installed, always
+	# consider this an update.
+	$this.getMoved origins
+	for origin in $origins; do
+		installedName="$(/usr/sbin/pkg_info -qO "$origin")"
+		if [ -n "$installedName" ]; then
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+#
+# Checks whether this is a reinstall without version changes.
+#
+# @return
+#	True (0) if this is a plain reinstall of an exisiting package,
+#	false (1) otherwise.
+#
+bsda:pkg:Package.isReinstall() {
+	local name
+	$this.getName name
+	# Returns false (1) if the name is not found.
+	/usr/sbin/pkg_info -Eq "$name"
+}
+
+#
+# Checks whether a version of this package is installed.
+#
+# Unlike isReinstall() any version is accepted.
+#
+# @return
+#	True (0) if a version of this package is already installed,
+#	false (1) otherwise.
+#
+bsda:pkg:Package.isInstalled() {
+	local origin
+	$this.getOrigin origin
+	# Returns true (0) if the origin is found.
+	test -n "$(/usr/sbin/pkg_info -qO "$origin")"
 }
 
 #
