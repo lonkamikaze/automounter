@@ -112,6 +112,9 @@ bsda:obj:createClass bsda:pkg:Index \
 	r:private:mappedPackages \
 		"The same list of packages only mapped by package origin" \
 		"in the format: |<origin>|<Package>" \
+	r:private:mappedNames \
+		"An incomplete list of packages in the format:" \
+		"	|<name>|<Package>" \
 	r:private:originBlacklist \
 		"A list of unavailable encountered origins." \
 	i:private:init \
@@ -356,7 +359,7 @@ bsda:pkg:Index.identifyPackages() {
 #	are installed.
 #
 bsda:pkg:Index.substitutePackage() {
-	local IFS newPkg origin known missing mapped
+	local IFS newPkg origin known missing mappedPackages mappedNames name
 
 	IFS='
 '
@@ -387,22 +390,24 @@ bsda:pkg:Index.substitutePackage() {
 	#
 	# Try to get the old package origin.
 	#
+	name=
 	origin=
 	case "$3" in
 	*/*)
-		origin="$(/usr/sbin/pkg_info -qo $(/usr/sbin/pkg_info -qO "$3") 2> /dev/null)"
+		name="$(/usr/sbin/pkg_info -qO "$3" 2> /dev/null)"
 		# Check for ambiguous matches.
-		if [ $(echo "$origin" | /usr/bin/wc -l) -gt 1 ]; then
+		if [ $(echo "$name" | /usr/bin/wc -l) -gt 1 ]; then
 			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_AMBIGUOUS
 			$caller.setvar "$1"
 			return 1
 		fi
 		# Check for not matching origins.
-		if [ -z "$origin" ]; then
+		if [ -z "$name" ]; then
 			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED
 			$caller.setvar "$1"
 			return 1
 		fi
+		origin="$(/usr/sbin/pkg_info -qo $name)"
 	;;
 	*)
 		origin="$(/usr/sbin/pkg_info -qo "$3" 2> /dev/null)"
@@ -423,6 +428,7 @@ bsda:pkg:Index.substitutePackage() {
 			$caller.setvar "$1"
 			return 1
 		fi
+		name="$(/usr/sbin/pkg_info -qO "$origin")"
 	;;
 	esac
 
@@ -443,8 +449,10 @@ bsda:pkg:Index.substitutePackage() {
 	#
 	
 	# Set up package mapping.
-	$this.getMappedPackages mapped
-	setvar ${this}mappedPackages "${mapped:+$mapped$IFS}|$origin|$newPkg"
+	$this.getMappedPackages mappedPackages
+	setvar ${this}mappedPackages "${mappedPackages:+$mappedPackages$IFS}|$origin|$newPkg"
+	$this.getMappedNames mappedNames
+	setvar ${this}mappedNames "${mappedNames:+$mappedNames$IFS}|$name|$newPkg"
 
 	# Tell the package it is replacing another one.
 	$newPkg.addMoved "$origin"
@@ -711,7 +719,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	#
 	# Check the MOVED file for still missing packages.
 	#
-	local moved oldorigin neworigin
+	local moved oldorigin oldname neworigin
 
 	# Get the Moved instances.
 	$this.getMoved moved
@@ -751,6 +759,9 @@ bsda:pkg:Index.getPackagesByOrigins() {
 		packages="$packages${packages:+$IFS}$pkg"
 		# Create an alias with the old origin.
 		eval "${this}mappedPackages=\"\$${this}mappedPackages\${${this}mappedPackages:+\$IFS}|$oldorigin|$pkg\""
+		# Maybe pkg_info can tell us about a names.
+		oldname="$(/usr/sbin/pkg_info -qO "$oldorigin")"
+		test -n "$oldname" && eval "${this}mappedNames=\"\$${this}mappedNames\${${this}mappedNames:+\$IFS}|$oldname|$pkg\""
 		# Remember the old origin to remove it from
 		# the list of missing packages.
 		origins="$origins${origins:+$IFS}$oldorigin"
@@ -778,7 +789,35 @@ bsda:pkg:Index.getPackagesByOrigins() {
 #	The list of package names.
 #
 bsda:pkg:Index.getPackagesByNames() {
-	local index prefix numbers origins packages
+	local IFS index prefix numbers origins packages pkg bufferedPackages names
+	IFS='
+'
+
+	#
+	# First get cached package names.
+	#
+
+	# A list of packages found.
+	bufferedPackages=
+	# The names of packages found.
+	names=
+	for pkg in $($this.getMappedNames | /usr/bin/grep -F "$(echo "$2" | /usr/bin/sed -e 's/^/|/1' -e 's/$/|/1')"); do
+		pkg="${pkg#|}"
+		bufferedPackages="${bufferedPackages:+$bufferedPackages$IFS}${pkg#*|}"
+		names="${names:+$names$IFS}${pkg%%|*}"
+	done
+	# Assemble a list of names yet to be searched.
+	names="$(echo "$3" | /usr/bin/grep -vxF "$names")"
+
+	# If nothing is left to be done, skip the rest.
+	if [ -z "$names" ]; then
+		$caller.setvar "$1" "$bufferedPackages"
+		return
+	fi
+
+	#
+	# Properly request the remaining package names by origin.
+	#
 	$this.getOriginPrefix prefix
 	$this.getIndex index
 
@@ -789,7 +828,7 @@ bsda:pkg:Index.getPackagesByNames() {
 	# Forward the list of of origins to the getPackagesByOrigins() method.
 	$this.getPackagesByOrigins packages "$origins"
 	# Return the Package instances.
-	$caller.setvar "$1" "$packages"
+	$caller.setvar "$1" "$bufferedPackages${bufferedPackages:+${packages:+$IFS}}$packages"
 }
 
 #
@@ -806,6 +845,7 @@ bsda:pkg:Index.addPackages() {
 	eval "${this}packages=\"\$${this}packages\${${this}packages:+\$IFS}$1\""
 	for pkg in $1; do
 		eval "${this}mappedPackages=\"\$${this}mappedPackages\${${this}mappedPackages:+\$IFS}|$($pkg.getOrigin)|$pkg\""
+		eval "${this}mappedNames=\"\$${this}mappedNames\${${this}mappedNames:+\$IFS}|$($pkg.getName)|$pkg\""
 	done
 }
 
@@ -820,7 +860,10 @@ bsda:pkg:Index.addPackages() {
 #	A list of origins.
 #
 bsda:pkg:Index.getKnownPackages() {
-	local pkg origins origin packages
+	local IFS pkg origins origin packages
+
+	IFS='
+'
 
 	# The list of packages.
 	packages=
@@ -829,7 +872,7 @@ bsda:pkg:Index.getKnownPackages() {
 
 	# Fetch all available origins from the list of already existing
 	# packages.
-	for pkg in $($this.getMappedPackages | grep -F "$(echo "$3" | sed -e 's/^/|/1' -e 's/$/|/1')"); do
+	for pkg in $($this.getMappedPackages | /usr/bin/grep -F "$(echo "$3" | /usr/bin/sed -e 's/^/|/1' -e 's/$/|/1')"); do
 		# Fetch origin and Package instance from the mappedPackage line.
 		origin="${pkg%|*}"
 		origin="${origin#|}"
@@ -1028,7 +1071,6 @@ bsda:pkg:Package.getDependencies() {
 
 	# Check whether the buffer is already filled.
 	if eval "test \"\$${this}dependencies\" = 'null'"; then
-		echo FIRST
 		# The buffer needs filling.
 
 		# Check whether a package file is available.
