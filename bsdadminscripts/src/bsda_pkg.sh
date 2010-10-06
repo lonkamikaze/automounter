@@ -27,7 +27,10 @@ test -n "$bsda_pkg" && return 0
 bsda_pkg=1
 
 # Include framework for object oriented shell scripting.
-. ${bsda_dir:-.}/bsda_obj.sh
+. "${bsda_dir:-.}/bsda_obj.sh"
+
+# Import the bsda:download library.
+. "${bsda_dir:-.}/bsda_download.sh"
 
 #
 # Offers classes for package handling.
@@ -54,6 +57,13 @@ readonly bsda_pkg_ERR_INDEX_MOVED_MISSING=15
 
 # Moved exceptions.
 readonly bsda_pkg_ERR_MOVED_FILE_MISSING=16
+
+# File exceptions.
+readonly bsda_pkg_ERR_DOWNLOADER_INVALID=17
+readonly bsda_pkg_ERR_FILE_DIR_PERM=18
+readonly bsda_pkg_ERR_BACKUP_DIR_PERM=19
+readonly bsda_pkg_ERR_FILE_MISSING=20
+readonly bsda_pkg_ERR_FILE_INVALID=21
 
 # INDEX columns.
 readonly bsda_pkg_IDX_PKG=1
@@ -105,6 +115,25 @@ bsda:obj:createClass bsda:pkg:Index \
 		"INDEX filename." \
 	r:private:moved \
 		"A Moved instance." \
+	w:private:fileDir \
+	x:protected:getFileDir \
+		"The package directory." \
+	w:private:fileSuffix \
+	x:protected:getFileSuffix \
+		"The expected package file name suffix." \
+	w:private:backupDir \
+	x:protected:getBackupDir \
+		"The directory to store backups in." \
+	w:private:backupSuffix \
+	x:protected:getBackupSuffix \
+		"The backup file name suffix." \
+	w:private:downloader \
+	x:protected:getDownloader \
+		"A bsda:download:Manager instance." \
+	w:private:downloads \
+		"A list of the active downloads." \
+	w:private:downloadsCompleted \
+		"A list of instantly completed downloads." \
 	r:private:originPrefix \
 		"The ports directory used for building the packages." \
 	r:private:packages \
@@ -139,6 +168,13 @@ bsda:obj:createClass bsda:pkg:Index \
 		"Adds packages to the packages list." \
 	x:private:getKnownPackages \
 		"Gets already known packages by origin." \
+	x:public:registerDownloader \
+		"Registers a download manager that packages can use for" \
+		"fetching." \
+	x:protected:downloadStarted \
+		"Called by a Package to notify about a started download." \
+	x:public:completedDownloads \
+		"Returns a list of newly downloaded packages." \
 
 #
 # The constructor for an index interface object.
@@ -147,13 +183,24 @@ bsda:obj:createClass bsda:pkg:Index \
 #	The INDEX file name.
 # @param 2
 #	The Moved instances.
+# @param 3
+#	The optional package file directory, defaults to ".".
+# @param 4
+#	The optional package file suffix, defaults to ".tbz".
+# @param 5
+#	The optional backup directory, defaults to ".".
+# @param 6
+#	The optional package backup file suffix, defaults to ".tbz".
 # @throws bsda_pkg_ERR_INDEX_FILE_MISSING
 #	Is thrown if parameter one is not a file.
 # @throws bsda_pkg_ERR_INDEX_MOVED_MISSING
 #	Is thrown if the second parameter is not a bsda:pkg:Moved object.
+# @throws bsda_pkg_ERR_BACKUP_DIR_PERM
+#	No write access to the backup directory.
 #
 bsda:pkg:Index.init() {
-	local origin
+	local origin backup dir
+	# Check the INDEX file.
 	if [ ! -f "$1" ]; then
 		bsda_pkg_errno=$bsda_pkg_ERR_INDEX_FILE_MISSING
 		return 1
@@ -161,11 +208,41 @@ bsda:pkg:Index.init() {
 	setvar ${this}index "$1"
 	origin="$(head -n1 "$1"| cut -d\| -f$bsda_pkg_IDX_ORIGIN)"
 	setvar ${this}originPrefix "${origin%/*/*}/"
+
+	# Check the MOVED file.
 	if ! bsda:pkg:Moved.isInstance "$2"; then
 		bsda_pkg_errno=$bsda_pkg_ERR_INDEX_MOVED_MISSING
 		return 1
 	fi
 	setvar ${this}moved $2
+
+	# Determine the package file directory.
+	if [ -z "$3" ]; then
+		dir="."
+	else
+		dir="${3%/}"
+	fi
+	$this.setFileDir "$dir"
+
+	$this.setFileSuffix "${4:-.tbz}"
+
+	# Determine backup directory.
+	if [ -z "$5" ]; then
+		backup="."
+	else
+		backup="${5%/}"
+	fi
+	$this.setBackupDir "$dir"
+
+	# Check backup directory permissions.
+	if (/bin/mkdir -p "$backup/" && /usr/bin/touch "$backup/.$bsda_obj_pid") 2> /dev/null; then
+		/bin/rm "$backup/.$bsda_obj_pid"
+	else
+		bsda_pkg_errno=$bsda_pkg_ERR_BACKUP_DIR_PERM
+		return 1
+	fi
+
+	$this.setBackupSuffix "${6:-.tbz}"
 }
 
 #
@@ -807,7 +884,7 @@ bsda:pkg:Index.getPackagesByNames() {
 		names="${names:+$names$IFS}${pkg%%|*}"
 	done
 	# Assemble a list of names yet to be searched.
-	names="$(echo "$3" | /usr/bin/grep -vxF "$names")"
+	names="$(echo "$2" | /usr/bin/grep -vxF "$names")"
 
 	# If nothing is left to be done, skip the rest.
 	if [ -z "$names" ]; then
@@ -892,6 +969,121 @@ bsda:pkg:Index.getKnownPackages() {
 	$caller.setvar "$2" "$(echo "$3" | grep -vFx "$origins")"
 }
 
+#
+# Registers a download manager that packages can use for fetching.
+#
+# If the given downloader is valid the package file directory will be checked
+# for write permissions.
+#
+# @param 1
+#	A bsda:download:Manager instance.
+# @throws bsda_pkg_ERR_DOWNLOADER_INVALID
+#	Parameter 1 was not a bsda:download:Manager instance.
+# @throws bsda_pkg_ERR_FILE_DIR_PERM
+#	No write access to the package file directory.
+#
+bsda:pkg:Index.registerDownloader() {
+	local dir
+
+	# Check download manager.
+	if ! bsda:download:Manager.isInstance "$1"; then
+		bsda_pkg_errno=$bsda_pkg_ERR_DOWNLOADER_INVALID
+		return 1
+	fi
+
+	# Check package file directory permissions.
+	$this.getFileDir dir
+	if (/bin/mkdir -p "$dir/" && /usr/bin/touch "$dir/.$bsda_obj_pid") 2> /dev/null; then
+		/bin/rm "$dir/.$bsda_obj_pid"
+	else
+		bsda_pkg_errno=$bsda_pkg_ERR_DOWNLOADER_DIR_PERM
+		return 1
+	fi
+
+
+	$this.setDownloader $1
+	return 0
+}
+
+#
+# Records download jobs that got started.
+#
+# @param 1
+#	The optional running download job.
+#
+bsda:pkg:Index.downloadStarted() {
+	local IFS downloader downloads pkg
+
+	IFS='
+'
+
+	# Get the caller.
+	$caller.getObject pkg
+
+	# Check if the download has a job.
+	if [ -n "$1" ]; then
+		# Append the job to the list of running downloads.
+		$this.getDownloads downloads
+		$this.setDownloads "${downloads:+$downloads$IFS}$1|$pkg"
+	else
+		# Just list the package as a completed download.
+		$this.getDownloadsCompleted downloads
+		$this.setDownloadsCompleted "${downloads:+$downloads$IFS}$pkg"
+	fi
+}
+
+#
+# Returns a list of Package instances that finished downloading.
+#
+# Every download will only be returned once.
+#
+# @param &1
+#	The name of the variable to return the list to.
+# @return 0
+#	New completed downloads are returned.
+# @return 1
+#	There are no downloads to return.
+#
+bsda:pkg:Index.completedDownloads() {
+	local IFS downloader jobs job downloads completed
+
+	IFS='
+'
+
+	# Get the downloads that were instantly completed.
+	$this.getDownloadsCompleted completed
+	$this.setDownloadsCompleted
+
+	# Check if the downloader is active.
+	$this.getDownloader downloader
+	if [ -n "$downloader" ]; then
+		# There is a downloader, so it is necessary to ask it for
+		# updates.
+
+		# Synchronize with the background downloader.
+		$downloader.run
+
+		# Ask for completed jobs.
+		if $downloader.completedJobs jobs; then
+			# The download results are not really interesting,
+			# throw the jobs away.
+			for job in $jobs; do
+				$job.delete
+			done
+
+			# Assemble a list of completed jobs.
+			$this.getDownloads downloads
+			completed="${completed:+$completed$IFS}$(echo "$downloads" | /usr/bin/grep -F "$jobs" | /usr/bin/sed 's/.*|//')"
+			downloads="$(echo "$downloads" | /usr/bin/grep -vF "$jobs")"
+			$this.setDownloads "$downloads"
+		fi
+	fi
+
+	# Return the list of completed jobs.
+	$caller.setvar "$1" "$completed"
+	# Generate the correct return value.
+	test -n "$completed"
+}
 
 #
 # An instance of this class represents a package file.
@@ -943,7 +1135,7 @@ bsda:pkg:File.getContents() {
 	conflicts=
 
 	# Process the +CONTENTS file in the tar archive line by line.
-	for line in $(tar -xOf "$file" '+CONTENTS'); do
+	for line in $(tar -xqOf "$file" '+CONTENTS'); do
 		case "$line" in
 			@name\ *)
 				name="${line#@name }"
@@ -1022,6 +1214,12 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Check whether this is a reinstall without version changes." \
 	x:public:isInstalled \
 		"Check whether a version of this package is installed." \
+	x:public:sync \
+		"Synchronize a package with the download server." \
+	x:public:fetch \
+		"Fetch a package if necessary." \
+	x:public:verify \
+		"Verify the package file and adopt it." \
 
 #
 # The constructor initializes all the attributes.
@@ -1179,6 +1377,147 @@ bsda:pkg:Package.isInstalled() {
 }
 
 #
+# Sync a package file with the download servers.
+#
+# If no download manager is present or the package is already paired with a
+# file, this will just tell the index that the file download was completed.
+#
+bsda:pkg:Package.sync() {
+	local index suffix dir downloader file job
+
+	$this.getIndex index
+
+	# Check whether this already has a file.
+	$this.getFile file
+	if [ -n "$file" ]; then
+		$index.downloadStarted
+		return 0
+	fi
+
+	$index.getDownloader downloader
+
+	# Check for downloader.
+	if [ -z "$downloader" ]; then
+		# Nothing to be done.
+		$index.downloadStarted
+		return 0
+	fi
+
+	# Get file and path names.
+	$index.getFileSuffix suffix
+	$index.getFileDir dir
+	$this.getName file
+	file="$file$suffix"
+
+	# Dispatch the download job.
+	$downloader.createJob job "$file" "$dir/$file"
+
+	# Tell the index about this download.
+	$index.downloadStarted $job
+}
+
+#
+# Fetch a package file if not present.
+#
+# If no download manager is present or the package is already paired with a
+# file, this will just tell the index that the file download was completed.
+#
+bsda:pkg:Package.fetch() {
+	local index suffix dir downloader file job
+
+	$this.getIndex index
+
+	# Check whether this already has a file.
+	$this.getFile file
+	if [ -n "$file" ]; then
+		$index.downloadStarted
+		return 0
+	fi
+
+	$index.getDownloader downloader
+
+	# Check for downloader.
+	if [ -z "$downloader" ]; then
+		# Nothing to be done.
+		$index.downloadStarted
+		return 0
+	fi
+
+	# Get file and path names.
+	$index.getFileSuffix suffix
+	$index.getFileDir dir
+	$this.getName file
+	file="$file$suffix"
+	if [ -r "$dir/$file" ]; then
+		# File exists, bail out.
+		$index.downloadStarted
+		return 0
+	fi
+		
+
+	# Dispatch the download job.
+	$downloader.createJob job "$file" "$dir/$file"
+	setvar ${this}download $job
+
+	# Tell the index about this download.
+	$index.downloadStarted $job
+}
+
+#
+# Checks whether the given package has a readable package file and
+# whether tar accepts it as an archive.
+#
+# After the verification the final pairing with the file is done,
+# as if the package was originally created from that file.
+#
+# @param &1
+#	The name of the variable to store the name of the verified file in.
+# @throws bsda_pkg_ERR_FILE_MISSING
+#	The package file is not present.
+# @throws bsda_pkg_ERR_FILE_INVALID
+#	The file is not a package file.
+#
+bsda:pkg:Package.verify() {
+	local file index suffix dir
+	
+	# Check whether this already has a file.
+	$this.getFile file
+	if [ -n "$file" ]; then
+		# This file is already verified.
+		$file.getFile file
+		$caller.setvar "$1" "$file"
+		return 0
+	fi
+
+	# Get file and path names.
+	$index.getFileSuffix suffix
+	$index.getFileDir dir
+	$this.getName file
+	file="$dir/$file$suffix"
+
+	# Return the file, no matter what happens.
+	$caller.setvar "$1" "$file"
+
+	if [ ! -r "$file" ]; then
+		# The file is missing!
+		bsda_pkg_errno=$bsda_pkg_ERR_FILE_MISSING
+		return 1
+	fi
+
+	# Check whether this is a tar archive containing a +CONTENTS file.
+	if ! /usr/bin/tar -qtf "$file" +CONTENTS 2>&1 > /dev/null; then
+		# The file is not a package file!
+		bsda_pkg_errno=$bsda_pkg_ERR_FILE_INVALID
+		return 1
+	fi
+
+	# Create the new file.
+	bsda:pkg:File ${this}file "$file"
+	setvar ${this}file
+	return 0
+}
+
+#
 # Instances of this class represent a MOVED file.
 #
 bsda:obj:createClass bsda:pkg:Moved \
@@ -1195,10 +1534,10 @@ bsda:obj:createClass bsda:pkg:Moved \
 # @param 1
 #	The MOVED file name.
 # @throws bsda_pkg_ERR_MOVED_FILE_MISSING
-#	Is thrown if the first parameter is not a file.
+#	Is thrown if the first parameter is not a readable file.
 #
 bsda:pkg:Moved.init() {
-	if [ ! -f "$1" ]; then
+	if [ ! -r "$1" ]; then
 		bsda_pkg_errno=$bsda_pkg_ERR_MOVED_FILE_MISSING
 		return 1
 	fi

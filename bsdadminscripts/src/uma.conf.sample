@@ -16,4 +16,4 @@
 #
 # Use German mirrors.
 #
-#PACKAGEROOT_MIRRORS="ftp://ftp.de.FreeBSD.org;ftp://ftp2.de.FreeBSD.org;ftp://ftp3.de.FreeBSD.org;ftp://ftp4.de.FreeBSD.org;ftp://ftp5.de.FreeBSD.org;ftp://ftp6.de.FreeBSD.org;ftp://ftp7.de.FreeBSD.org;ftp://ftp8.de.FreeBSD.org"
+#PACKAGEROOT_MIRRORS="http://ftp.de.FreeBSD.org;http://ftp2.de.FreeBSD.org;http://ftp3.de.FreeBSD.org;http://ftp4.de.FreeBSD.org;http://ftp5.de.FreeBSD.org;http://ftp6.de.FreeBSD.org;http://ftp7.de.FreeBSD.org;http://ftp8.de.FreeBSD.org"

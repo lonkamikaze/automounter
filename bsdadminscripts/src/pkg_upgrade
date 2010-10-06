@@ -42,18 +42,33 @@ conf="$prefix/etc/$name.conf"
 eval "$($rundir/uma env $$ | /usr/bin/sed -E "s/^([[:alnum:]_]+=')/export \1/1")"
 
 # Load the confiugration file if present.
-if [ -e "$conf" ]; then
+if [ -r "$conf" ]; then
 	. "$conf"
 fi
 
 #
 # Set sane environment defaults.
 #
+: ${PACKAGES="$(make -V PACKAGES -f /usr/share/mk/bsd.port.mk 2> /dev/null)"}
+#HACK
+: ${PACKAGES=/usr/ports/packages}
+: ${PKG_DBDIR=/var/db/pkg}
+: ${TMPDIR=/tmp}
+#hack
+: ${PACKAGES="%%PORTS%%/packages"}
+: ${PKG_DBDIR=%%VAR%%/db/pkg}
+: ${TMPDIR=%%TMP%%}
+: ${PKG_TMPDIR=$TMPDIR}
 : ${PKG_BACKUP_SUFX=.tbz}
+: ${PKG_BACKUP_DIR="${PACKAGES%/}/pkg_upgrade-backup"}
+: ${PKG_FILE_SUFX=.tbz}
 : ${RUNDIR=$rundir}
 
-# Make sure environment variables turn up in the environment.
-export PKG_BACKUP_SUFX
+# Export environment variables to ensure that every tool uses the same ones.
+export PACKAGES PKG_DBDIR TMPDIR PKG_TMPDIR
+
+# The following variables are only for use inside pkg_upgrade.
+#	PKG_BACKUP_SUFX PKG_DOWNLOAD_SUFX RUNDIR
 
 #
 # Load libraries.
@@ -120,6 +135,10 @@ readonly pu_ERR_PACKAGE_FORMAT=11
 readonly pu_ERR_str_11=ERR_PACKAGE_FORMAT
 readonly pu_ERR_CONFLICT=12
 readonly pu_ERR_str_12=ERR_CONFLICT
+readonly pu_ERR_BACKUP_DIR=13
+readonly pu_ERR_str_13=ERR_BACKUP_DIR
+readonly pu_ERR_FILE_DIR=14
+readonly pu_ERR_str_14=ERR_FILE_DIR
 
 #
 # Holds the current error state, one of pu_ERR_* or 0.
@@ -131,7 +150,7 @@ pu_errno=0
 #
 bsda:tty:Terminal pu_terminal
 # Trap this, just for starters until the Session object takes over.
-trap "$pu_terminal.delete" EXIT
+trap "$pu_terminal.delete; exit $pu_ERR_USER" sighup sigint sigterm
 
 #
 # Parses the command line parameters.
@@ -173,7 +192,7 @@ pu_params() {
 			if [ $((flags & pu_FLAG_RECURSIVE)) -ne 0 ]; then
 				errors="${errors:+$errors$IFS}$arg Recursiveness has no effect, because all packages are already selected for processing."
 			fi
-			if [ $((flags & pu_FLAG_RECURSIVE)) -ne 0 ]; then
+			if [ $((flags & pu_FLAG_UPWARD_RECURSIVE)) -ne 0 ]; then
 				errors="${errors:+$errors$IFS}$arg Upward recursiveness has no effect, because all packages are already selected for processing."
 			fi
 			flags=$((flags | pu_FLAG_ALL))
@@ -335,7 +354,7 @@ pu_params() {
 		;;
 		-*)
 			# Split concatenated parameters.
-			set - "${arg%%${arg#-?}}" "-${arg#-?}" "$@"
+			set -- "${arg%%${arg#-?}}" "-${arg#-?}" "$@"
 		;;
 		'')
 			# Ignore empty parameters.
@@ -348,33 +367,26 @@ pu_params() {
 	done
 
 	#
-	# Perform final parameter logic checks that cannot be performed on the
-	# fly without enforcing a certain order of parameters.
-	#
-	# TODO Might become obsolete because of depending packages reinstall
-	if [ $((flags & pu_FLAG_RECURSIVE2)) -ne 0 -a $((flags & pu_FLAG_UPWARD_RECURSIVE)) -eq 0 ]; then
-		errors="${errors:+$errors$IFS}Thorough recursiveness can only be used in conjunction with upwards recursiveness."
-	fi
-
-	#
 	# If errors occoured, print them and bail out.
 	#
 	if [ -n "$errors" ]; then
 		echo "$errors" | /usr/bin/sed "s,^,ERROR(ERR_ARG=$pu_ERR_ARG): ," | $pu_terminal.stderr
-		pu_errno=$PU_ERR_ARG
+		pu_errno=$pu_ERR_ARG
 		return 1
 	fi
 
 	if pu:Session session $flags "$pkgPatterns" "$pkgReplace" $pu_terminal; then
+		$session.getErrno pu_errno
 		$session.delete
 	fi
 }
+
+
 
 #
 # An instance of this class represents a pkg_upgrade session.
 #
 # It holds all session information and can be terminated when an error occurs
-#
 #
 bsda:obj:createClass pu:Session \
 	implements:bsda:scheduler:Process \
@@ -386,11 +398,25 @@ bsda:obj:createClass pu:Session \
 		"The Terminal object for this session." \
 	w:private:index \
 		"The Index object for this session." \
-	w:private:moved \
-		"The Moved object for a session." \
+	w:private:downloader \
+		"The download manager." \
+	w:private:servers \
+		"The download servers." \
+	w:private:scheduler \
+		"The scheduler to use." \
+	w:private:state \
+		"The current state of the Session." \
 	w:private:packages \
 		"A list of bsda:pkg:Package instances to process." \
-	r:public:errno \
+	w:private:stateData \
+		"Data storage for the currently running state." \
+	w:private:stateStatus \
+		"Status storage for the currently running state." \
+	w:private:unindexed \
+		"A list of installed origins that could not be returned" \
+		"by the INDEX." \
+	w:private:errno \
+	x:public:getErrno \
 		"The current error state of the session." \
 	i:private:init \
 		"The constructor initializes a session." \
@@ -400,20 +426,43 @@ bsda:obj:createClass pu:Session \
 		"Setup signal trapping." \
 	x:private:setupTerminal \
 		"Updates the terminal to use." \
+	x:private:setupScheduler \
+		"Setup the scheduler that takes over after preprocessing." \
 	x:private:setupLock \
 		"Creates an UMA lock." \
 	x:private:setupIndex \
 		"Updates the index." \
+	x:private:setupDownloader \
+		"Starts the download manager." \
 	x:private:setupPkgs \
 		"Setup the packages list." \
+	x:private:setupImplicitPkgs \
+		"Add implicit packages." \
+	x:private:updateAll \
+		"Adds all outdated packages." \
+	x:private:updateDependencies \
+		"Updates all dependencies." \
+	x:private:getNewDependencies \
+		"Returns a list of dependencies for a list of packages." \
+	x:private:getNewDepending \
+		"Returns a list of depending packages for a list of" \
+		"packages." \
+	x:private:sortPkgs \
+		"Sortst the list of packages by dependency." \
 	x:private:error \
-		"Outputs an error message and sets pu_errno." \
+		"Outputs an error message and sets errno." \
 	x:private:warn \
 		"Outputs a warning." \
 	x:private:verbose \
 		"Produce verbose output." \
+	x:private:status \
+		"Produce status output." \
 	x:private:uma \
 		"Calls UMA with the given parameters." \
+	x:private:runVerify \
+		"Run this in Verify state." \
+	x:private:runStop \
+		"Run this in Stop state." \
 
 #
 # @param 1
@@ -427,13 +476,34 @@ bsda:obj:createClass pu:Session \
 #	The terminal to use.
 #
 pu:Session.init() {
-	setvar ${this}errno 0
+	local scheduler
+
+	$this.setErrno 0
 	$this.setFlags $1
 	$this.setupTerminal $4
-	$this.setupSignals
-	$this.setupLock || return
-	$this.setupIndex || return
-	$this.setupPkgs "$3" "$2" || return
+	$this.setupScheduler
+	$this.setupLock || return 0
+	$this.setupIndex || return 0
+	$this.setupDownloader || return 0
+	$this.setupPkgs "$3" "$2" || return 0
+	$this.setupImplicitPkgs
+	$this.sortPkgs
+	#$this.setupSignals
+
+#	$this.getScheduler scheduler
+#	$this.verbose "Verifying package downloads."
+#	$this.setState Verify
+#	$scheduler.run
+
+	local IFS packages pkg
+	IFS='
+'
+	$this.getPackages packages
+	for pkg in $packages; do
+		$pkg.getOrigin
+	done | $4.stdout
+	$this.getPackages | wc -l | $4.stdout
+	$this.getPackages | wc -l | sort -u | $4.stdout
 }
 
 pu:Session.clean() {
@@ -459,7 +529,22 @@ pu:Session.setupTerminal() {
 	# requested.
 	if [ $((flags & pu_FLAG_CLEAN)) -ne 0 ]; then
 		$1.deactivate
+	else
+		$1.use 1
 	fi
+}
+
+pu:Session.setupScheduler() {
+	local scheduler sleeper
+	# Create the scheduler.
+	bsda:scheduler:RoundTripScheduler scheduler
+	$this.setScheduler $scheduler
+
+	# Create a sleeper job.
+	bsda:scheduler:Sleep sleeper 1
+
+	$scheduler.register $sleeper
+	$scheduler.register $this
 }
 
 pu:Session.setupLock() {
@@ -489,21 +574,100 @@ pu:Session.setupIndex() {
 			$this.error $pu_ERR_INDEX "Acquiring an up to date INDEX/MOVED/UPDATING failed."
 			return 1
 		fi
-	else
-		# Keeping the index was requested, check whether there is one.
-		if [ ! -r "$PKG_INDEX" ]; then
-			$this.error $pu_ERR_INDEX "Cannot read INDEX file at '$PKG_INDEX'."
-			return 1
-		fi
-		if [ ! -r "$PKG_MOVED" ]; then
-			$this.error $pu_ERR_INDEX "Cannot read MOVED file at '$PKG_MOVED'."
-			return 1
-		fi
 	fi
-	bsda:pkg:Moved moved "$PKG_MOVED"
-	bsda:pkg:Index index "$PKG_INDEX" $moved
-	$this.setMoved $moved
+	if ! bsda:pkg:Moved moved "$PKG_MOVED"; then
+		case $bsda_pkg_errno in
+		$bsda_pkg_ERR_MOVED_FILE_MISSING)
+			$this.error $pu_ERR_INDEX "Cannot read MOVED file at '$PKG_MOVED'."
+		;;
+		*)
+			$this.error -1 "Unexpected error in line $LINENO."
+		;;
+		esac
+		return 1
+	fi
+	if ! bsda:pkg:Index index "$PKG_INDEX" $moved "${PACKAGES%/}/All" "$PKG_FILE_SUFX" "$PKG_BACKUP_DIR" "$PKG_BACKUP_SUFX"; then
+		case $bsda_pkg_errno in
+		$bsda_pkg_ERR_INDEX_FILE_MISSING)
+			$this.error $pu_ERR_INDEX "Cannot read INDEX file at '$PKG_INDEX'."
+		;;
+		$bsda_pkg_ERR_INDEX_MOVED_MISSING)
+			$this.error $pu_ERR_INDEX "Cannot read MOVED file at '$PKG_MOVED'."
+		;;
+		$bsda_pkg_ERR_BACKUP_DIR_PERM)
+			$this.error $pu_ERR_BACKUP_DIR "Cannot write to the package backup directory '$PKG_BACKUP_DIR'."
+		;;
+		*)
+			$this.error -1 "Unexpected error in line $LINENO."
+		;;
+		esac
+		return 1
+	fi
 	$this.setIndex $index
+}
+
+#
+# Create a background downloader session.
+#
+pu:Session.setupDownloader() {
+	local IFS flags master mirror servers downloader index
+	IFS='
+'
+
+	# Check the flags.
+	$this.getFlags flags
+	if [ $((flags & pu_FLAG_NO_ACTIONS)) -ne 0 ]; then
+		# This is just a simulation run, do not perform downloads.
+		return 0
+	fi
+
+	# Check whether downloading is necessary.
+	if [ "${PACKAGES%/}" = "${PACKAGESITE%/*?}" ]; then
+		# Packages are available locally, through a networking FS
+		# or nullfs_mount.
+		return 0
+	fi
+
+	# Get the download locations.
+	bsda:download:Server master "${PACKAGESITE%/*?}/All"
+	mirrors=
+	for mirror in $PACKAGESITE_MIRRORS; do
+		bsda:download:Server mirror "${mirror%/*?}/All"
+		mirrors="${mirrors:+$mirrors$IFS}$mirror"
+	done
+
+	# Create a collections of servers, bail out with errors.
+	bsda:download:Servers servers $master $mirrors
+	case $? in
+	1)
+		$this.error $pu_ERR_DOWNLOADER "The download manager could not be started, because of an unspecified problem with the master server defined in the PACKAGESITE environment variable."
+		return 1
+	;;
+	2)
+		$this.error $pu_ERR_DOWNLOADER "The download manager could not be started, because of an unspecified problem with at least one of the download mirrors defined in the PACKAGESITE_MIRRORS environment variable."
+		return 1
+	;;
+	esac
+	$this.setServers $servers
+
+	# Start a background download manager that commits suicide if this
+	# process dies.
+	bsda:download:Manager downloader $servers $bsda_obj_pid
+	$this.setDownloader $downloader
+
+	# Tell the index about the download manager.
+	$this.getIndex index
+	if ! $index.registerDownloader $downloader; then
+		case $bsda_pkg_errno in
+		$bsda_pkg_ERR_DOWNLOADER_INVALID)
+			$this.error -1 "Unexpected error in line $LINENO."
+		;;
+		$bsda_pkg_ERR_FILE_DIR_PERM)
+			$this.error $pu_ERR_FILE_DIR "Downloading does not work, because there is no write access to '${PACKAGES%/}/All'."
+		;;
+		esac
+		return 1
+	fi
 }
 
 #
@@ -582,7 +746,7 @@ pu:Session.setupPkgs() {
 	for pattern in $2; do
 		# Try to get the packages from the index.
 		if $index.identifyPackages pkgs "$pattern"; then
-			packages="${packages:+$packages$IFS}$pkg"
+			packages="${packages:+$packages$IFS}$pkgs"
 		else
 			msg="Updating or (re)installing '$pattern' failed"
 			case $bsda_pkg_errno in
@@ -613,9 +777,402 @@ pu:Session.setupPkgs() {
 	# Store the packages to explicitely update or (re)install.
 	$this.setPackages "$packages"
 
+	# Start downloads.
+	for pkg in $packages; do
+		$pkg.fetch
+	done
+
 	# Return false if an error occured.
 	$this.getErrno errno
 	test $errno -eq 0
+}
+
+pu:Session.setupImplicitPkgs() {
+	$this.updateAll
+	$this.updateDependencies
+}
+
+pu:Session.updateAll() {
+	local IFS local flags force origin operator index unindexed packages
+	local origins pkg pkgs
+
+	# Get the flags.
+	$this.getFlags flags
+	# Check whether the all flag is set.
+	if [ $((flags & pu_FLAG_ALL)) -eq 0 ]; then
+		# All flag is not set, skip this.
+		return
+	fi
+
+	$this.verbose 'Checking all installed packages for updates.'
+
+	IFS='
+'
+
+	# Get the force flag.
+	force=
+	if [ $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+		force=1
+	fi
+
+	#
+	# Get all outdated packages or simply all, in force mode.
+	#
+
+	# Get the index.
+	$this.getIndex index
+	# Get the list of unindexed packages.
+	$this.getUnindexed unindexed
+	# Collect the origins or packages matching the update criteria.
+	origins=
+	# Let pkg_version do the work of finding outdated packages.
+	# Jump in where it fails.
+	for origin in $(/usr/sbin/pkg_version -Io "$PKG_INDEX"); {
+		operator="${origin##* }"
+		origin="${origin%% *}"
+		case "$operator" in
+		'!' | '?' | '*')
+			# pkg_version seems to output '!' where it should
+			# output '?', so we treat them the same.
+			# The examples for '*' in the pkg_version(1) manual
+			# page are not up to date. The very idea of a '*'
+			# ever occuring here gives me nightmares, but it's
+			# probably still for the best to at least try and
+			# handle this case with some grace.
+
+			# The basic idea here is that bsda:pkg is more clever
+			# than pkg_version. The missing origin might have
+			# shown up in a package file or can be acquired from
+			# the MOVED file.
+
+			$index.getPackagesByOrigins pkg "$origin"
+
+			# Check whether a package was returned.
+			if [ -z "$pkg" ]; then
+				# The package couldn't be identified,
+				# this is the common case.
+				unindexed="${unindexed:+$unindexed$IFS}$origin"
+			else
+				if [ -n "$force" ]; then
+					# Always add in forced mode.
+					origins="${origins:+$origins$IFS}$origin"
+				elif $pkg.isUpdate; then
+					# Otherwise only if this is an update.
+					origins="${origins:+$origins$IFS}$origin"
+				fi
+			fi
+		;;
+		'=' | '>')
+			# Up to date packages are not touched here unless
+			# in force mode.
+			test -n "$force" && origins="${origins:+$origins$IFS}$origin"
+		;;
+		'<')
+			origins="${origins:+$origins$IFS}$origin"
+		;;
+		esac
+	}
+
+	# Update the unindexed origins.
+	$this.setUnindexed "$(echo "$unindexed" | /usr/bin/sort -u)"
+
+	#
+	# Add all the origins.
+	#
+
+	# Note that everything in origins is guaranteed to be found, because
+	# it's either in INDEX or has been found before. So there is no need
+	# to check for missing packages.
+	$this.getPackages packages
+	$index.getPackagesByOrigins pkgs "$origins"
+	# Remove duplicates.
+	pkgs="$(echo "$pkgs" | grep -vxF "$packages")"
+	$this.setPackages "$(echo "$packages${packages:+${pkgs:+$IFS}}$pkgs")"
+
+	
+	# Start downloads for new packages.
+	for pkg in $pkgs; do
+		$pkg.fetch
+	done
+}
+
+pu:Session.updateDependencies() {
+	local IFS flags dependencies depending packages pkg
+
+	$this.verbose "Performing dependency checks."
+
+	IFS='
+'
+
+	# Start with all packages currently enlisted.
+	$this.getPackages packages
+
+	# Single recursiveness is handled inside the getNewDep*() methods.
+	$this.getNewDepending depending "$packages"
+	$this.getNewDependencies dependencies "$packages"
+	
+	# Check deep recursion flags, if not set deactivate recursion flags
+	# so that only obligatory checks are done recursively.
+	$this.getFlags flags
+	if [ $((flags & pu_FLAG_RECURSIVE2)) -eq 0 ]; then
+		# Deep recursion is not activated, turn recursiveness off.
+		flags=$((flags & (-1 ^ pu_FLAG_RECURSIVE)))
+	fi
+	if [ $((flags & pu_FLAG_UPWARD_RECURSIVE2)) -eq 0 ]; then
+		# Deep recursion is not activated, turn recursiveness off.
+		flags=$((flags & (-1 ^ pu_FLAG_UPWARD_RECURSIVE)))
+	fi
+	$this.setFlags $flags
+
+	#
+	# Now perform dependency checks until nothing new shows up.
+	#
+	while [ -n "$depending$dependencies" ]; do
+		if [ -n "$dependencies" ]; then
+			# Download new dependencies.
+			for pkg in $dependencies; do
+				$pkg.fetch
+			done
+			# Get upward dependencies for the new dependencies.
+			$this.getNewDepending depending "$dependencies"
+			packages="$packages${packages:+${dependencies:+$IFS}}$dependencies"
+			$this.setPackages "$packages"
+			dependencies=
+		fi
+		if [ -n "$depending" ]; then
+			# Download new upward dependencies.
+			for pkg in $depending; do
+				$pkg.fetch
+			done
+			# Get dependencies for the new upward dependencies.
+			$this.getNewDependencies dependencies "$depending"
+			packages="$packages${packages:+${depending:+$IFS}}$depending"
+			$this.setPackages "$packages"
+			depending=
+		fi
+	done
+}
+
+#
+# @param &1
+#	The variable to store the new dependencies in.
+# @param 2
+#	The packages to check for missing dependencies.
+#
+pu:Session.getNewDependencies() {
+	local IFS flags pkg pkgDepends depends packages time
+
+	# Bail out without packages to check.
+	if [ -z "$2" ]; then
+		$caller.setvar "$1"
+		return
+	fi
+
+	IFS='
+'
+
+	$this.status "Checking dependencies for $(($(echo "$2" | /usr/bin/wc -l))) packages ..."
+
+	#
+	# Get all dependencies of the requested packages.
+	#
+	# NOTE performance: can take a high number of seconds
+	#
+	packages="$2"
+	depends=
+	while [ -n "$packages" ]; do
+		pkg="${packages%%$IFS*}"
+		$pkg.getDependencies pkgDepends
+		depends="$depends${depends:+${pkgDepends:+$IFS}}$pkgDepends"
+		# Remove this package from the list of packages to ask for
+		# dependencies. Because dependency information is recursive
+		# also remove the just returned dependencies from the list.
+		packages="$(echo "$packages" | /usr/bin/grep -vxF "$pkg${pkgDepends:+$IFS$pkgDepends}")"
+	done
+
+	# No dependencies, fine with me.
+	if [ -z "$depends" ]; then
+		$caller.setvar "$1"
+		return
+	fi
+
+	# Get the already listed packages.
+	$this.getPackages packages
+	# Filter the dependencies by already known packages and remove
+	# duplicates.
+	depends="$(echo "$depends" \
+		| /usr/bin/grep -vxF "$packages${packages:+${2:+$IFS}}$2" \
+		| /usr/bin/sort -u
+	)"
+
+	#
+	# Assemble a list of packages to return.
+	#
+	packages=
+	# Check for recursive flag.
+	$this.getFlags flags
+	if [ $((flags & pu_FLAG_RECURSIVE)) -ne 0 ]; then
+		if [ $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+			# In force recursive mode all dependencies get added.
+			packages="$depends"
+		else
+			# In plain recursive mode all dependencies missing
+			# or outdated get added.
+			for pkg in $depends; do
+				if $pkg.isUpdate; then
+					packages="${packages:+$packages$IFS}$pkg"
+				fi
+			done
+		fi
+	else
+		# Only missing dependencies get added.
+		for pkg in $depends; do
+			if ! $pkg.isInstalled; then
+				packages="${packages:+$packages$IFS}$pkg"
+			fi
+		done
+	fi
+
+	# Return the dependencies to add.
+	$caller.setvar "$1" "$packages"
+}
+
+#
+# @param &1
+#	The variable to store the new dependencies in.
+# @param 2
+#	The packages to check for depending packages.
+#
+pu:Session.getNewDepending() {
+	local IFS flags index packages all updates requests pkg depending
+	local pkgDependencies
+
+	# Bail out for empty parameters.
+	if [ -z "$2" ]; then
+		$caller.setvar "$1"
+		return
+	fi
+
+	# Get the flags.
+	$this.getFlags flags
+
+	# If the force and all flag is set this will never yield something.
+	if [ $((flags & pu_FLAG_ALL)) -ne 0 -a $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+		$caller.setvar "$1"
+		return
+	fi
+
+	IFS='
+'
+
+	$this.status "Checking upwards dependencies for $(($(echo "$2" | /usr/bin/wc -l))) packages ..."
+
+	#
+	# Compile a list of packages from the given ones, sort them into
+	# updates and other request flags.
+	#
+	updates=
+	requests=
+	for pkg in $2; do
+		if $pkg.isUpdate; then
+			# This is an update request and thus processing
+			# depending packages is obligatory.
+			updates="${updates:+$updates$IFS}$pkg"
+		else
+			# The other ones are only needed when upward
+			# recursiveness is set.
+			if [ $((flags & pu_FLAG_UPWARD_RECURSIVE)) -ne 0 ]; then
+				requests="${requests:+$requests$IFS}$pkg"
+			fi
+		fi
+	done
+
+	# Check whether any updates were found and whether the upward
+	# recursive flag is not set.
+	if [ -z "$updates" -a -z "$requests" ]; then
+		# No updates and no upward recursiveness?
+		# This time consuming endeavour can be skipped.
+		$caller.setvar "$1"
+		return
+	fi
+
+	#
+	# Get a list of all packages.
+	#
+	# NOTE performance: can take several seconds
+	# This takes very long (the first time)!
+	# Using "pkg_info -R" would be faster, but
+	# less reliable.
+	#
+	$this.getPackages packages
+	$this.getIndex index
+	# Get all installed packages, this is what takes so long.
+	$index.identifyPackages all '*'
+	# We don't need to check the ones already listed for processing.
+	all="$(echo "$all" | /usr/bin/grep -vxF "${packages:+$packages$IFS}$2")"
+
+	# Check all remaining packages, whether they depend on the given ones.
+	depending=
+	while [ -n "$all" ]; do
+		pkg="${all%%$IFS*}"
+		all="${all#$pkg}"
+		all="${all#$IFS}"
+		$pkg.getDependencies pkgDependencies
+		if echo "$pkgDependencies" | /usr/bin/grep -qxF "${updates:-#}"; then
+			# Packages depending on uppdates always get added.
+			depending="${depending:+$depending$IFS}$pkg"
+		elif echo "$pkgDependencies" | /usr/bin/grep -qxF "${requests:-#}"; then
+			# Requests is only populated if upward recursiveness
+			# is set.
+			if [ $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+				# In forced mode just add the package.
+				depending="${depending:+$depending$IFS}$pkg"
+			elif $pkg.isUpdate; then
+				# This packe appears to be outdated, so add
+				# it.
+				depending="${depending:+$depending$IFS}$pkg"
+			fi
+		else
+			# The current package does not need to be reinstalled,
+			# thus all dependencies of it do not need to either.
+			all="$(echo "$all" | /usr/bin/grep -vxF "$pkgDependencies")"
+		fi
+	done
+
+	# Return the found depending packages.
+	$caller.setvar "$1" "$depending"
+}
+
+pu:Session.sortPkgs() {
+	local IFS packages pkg sorted dependencies dependency
+
+	$this.verbose "Sorting packages by dependency."
+	IFS='
+'
+
+	#
+	# Sort the packages by dependency. The idea is to create a list of
+	# packages by always inserting them in sorted order.
+	#
+	$this.getPackages packages
+	$this.status "Sorting $(($(echo "$packages" | /usr/bin/wc -l))) packages ..."
+	sorted=
+	for pkg in $packages; do
+		# Get the last dependency in the list of packages to sort.
+		$pkg.getDependencies dependencies
+		dependency="$(echo "$sorted" | /usr/bin/grep -Fx "$dependencies" | /usr/bin/tail -n1)"
+
+		# Get the last matching dependency in the list.
+		if [ -z "$dependency" ]; then
+			sorted="$pkg${sorted:+$IFS$sorted}"
+			continue
+		fi
+
+		sorted="$(echo "$sorted" | /usr/bin/sed -E "/^$dependency$/a\\$IFS$pkg$IFS")"
+	done
+
+	# Set the packages to the sorted list.
+	$this.setPackages "$sorted"
 }
 
 #
@@ -627,17 +1184,136 @@ pu:Session.setupPkgs() {
 pu:Session.error() {
 	eval "
 	test \$${this}errno -eq 0 && ${this}errno=$1
-	\$${this}terminal.stderr \"ERROR(\$pu_ERR_str_$1=$1): $2\"
+	\$${this}terminal.stderr \"ERROR(\$pu_ERR_str_$1=$1): \$2\"
+	"
+}
+
+pu:Session.warn() {
+	eval "
+	\$${this}terminal.stderr \"pkg_upgrade: \$1\"
 	"
 }
 
 pu:Session.verbose() {
 	eval "
 	if [ \$((${this}flags & pu_FLAG_VERBOSE)) -ne 0 ]; then
-		\$${this}terminal.stdout \"$1\"
+		\$${this}terminal.stdout \"\$1\"
 	fi
+	\$${this}terminal.line 0 \"\${1%.} ...\"
 	"
 }
+
+pu:Session.status() {
+	eval "
+	\$${this}terminal.line 0 \"\$1\"
+	"
+}
+
+pu:Session.run() {
+	local state
+
+	#TODO signal handling
+
+	# Run the current job.
+	$this.getState state
+	$this.run$state
+}
+
+pu:Session.runVerify() {
+	local IFS index packages verified downloads pkg file errno
+	local downloader null jobs job statusJob terminal speed unit
+	local size progress line
+	IFS='
+'
+
+	# Show download status if available.
+	$this.getDownloader downloader
+	if [ -n "$downloader" ]; then
+		$downloader.run
+		$downloader.getStatus null null null jobs
+		$this.getStateStatus statusJob
+		$this.getTerminal terminal
+		statusJob="$(echo "$jobs" | /usr/bin/grep -Fx "$statusJob")"
+		# Pick one job to be displayed.
+		if [ -z "$statusJob" ]; then
+			statusJob="${jobs%%$IFS*}"
+		fi
+		$this.setStateStatus $statusJob
+		# Display a job, if one is active.
+		if [ -n "$statusJob" ]; then
+			$statusJob.getStatus file size full null null progress speed
+			$terminal.convertBytes speed unit "$speed" 4
+			speed="$speed ${unit}b/s"
+			$terminal.convertBytes full unit "$full" 4
+			full="$full ${unit}b"
+			$terminal.convertBytesToUnit size "$unit" "$size" 4
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
+			$this.status "$line"
+		else
+			$this.status "Waiting for downloads ..."
+		fi
+	fi
+	
+	#
+	# Verify completed downloads.
+	#
+	$this.getIndex index
+	$this.getPackages packages
+	$this.getStateData verified
+
+	# Check for newly completed downloads.
+	if $index.completedDownloads downloads; then
+		# Verify each package that was returned.
+		for pkg in $downloads; do
+			if ! $pkg.verify file; then
+				case $bsda_pkg_errno in
+				$bsda_pkg_ERR_FILE_MISSING)
+					$this.error $pu_ERR_FETCH "Downloading the file '$file' failed."
+				;;
+				$bsda_pkg_ERR_FILE_INVALID)
+					$this.error $pu_ERR_FETCH "The file '$file' is not a valid package."
+				;;
+				*)
+					$this.error -1 "Unexpected error in line $LINENO."
+				;;
+				esac
+				bsda_pkg_errno=
+			else
+				$this.verbose "Downloading package file '${file##*/}' completed."
+			fi
+		done
+		verified="${verified:+$verified$IFS}$downloads"
+	fi
+
+	$this.setStateData "$verified"
+
+	# Check if this state is completed.
+	if [ -z "$(echo "$packages" | /usr/bin/grep -vxF "$verified")" ]; then
+		# If an error occured it's time to end this.
+		$this.getErrno errno
+		if [ $errno -ne 0 ]; then
+			# Move to the next state.
+			$this.setState Stop
+		else
+			# Move to the next state.
+			$this.setState Stop
+		fi
+		# Clean up.
+		$this.setStateData
+		$this.setStateStatus
+	fi
+}
+
+pu:Session.runStop() {
+	local scheduler
+	$this.getScheduler scheduler
+	$scheduler.stop
+}
+
+pu:Session.stop() {
+	return
+}
+
 
 #
 # Calls UMA with the current PID.
