@@ -20,7 +20,7 @@ bsda:obj:createClass Demo \
 	w:value \
 		This is a comment \
 	x:fibonacciRecursive \
-		"This is a comment, too. <== my prefered style" \
+		"This is a comment, too. <== my preferred style" \
 
 #
 # Implementation of the fibonacciRecursive method for the
@@ -29,7 +29,7 @@ bsda:obj:createClass Demo \
 # Yes I know that this is the least efficient way of
 # doing this, but it demonstrates what I want it to.
 #
-# @param 1
+# @param &1
 #	The variable to store the fibonacci value in.
 # @param 2
 #	The index of the fibonacci value to return.
@@ -46,7 +46,7 @@ Demo.fibonacciRecursive() {
 	$this.fibonacciRecursive f1 $(($2 - 1))
 	$this.fibonacciRecursive f2 $(($2 - 2))
 
-	$caller.setvar "$1" $(($f1 + $f2))
+	$caller.setvar "$1" $((f1 + f2))
 }
 
 # Create instance.
@@ -59,7 +59,7 @@ $demo.fibonacciRecursive value 8
 $demo.fibonacciRecursive '' 8
 
 # Set an attribute.
-$demo.setValue $(($value - $($demo.fibonacciRecursive '' 6)))
+$demo.setValue $((value - $($demo.fibonacciRecursive '' 6)))
 
 # Get an attribute and ...
 # ... store the result in the value variable.

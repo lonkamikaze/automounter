@@ -69,11 +69,6 @@ if [ -e "$conf" ]; then
 	. "$conf"
 fi
 
-# Local index location.
-: ${PKG_INDEX="$vardir/db/uma/FTPINDEX"}
-: ${PKG_MOVED="$vardir/db/uma/FTPMOVED"}
-: ${PKG_UPDATING="$vardir/db/uma/FTPUPDATING"}
-
 # FTP communication.
 : ${FTP_PASSIVE_MODE=yes}
 : ${FTP_TIMEOUT=60}
@@ -100,6 +95,20 @@ esac
 : ${BRANCH=$branch}
 : ${PACKAGESITE="$PACKAGEROOT/pub/FreeBSD/ports/$ARCH/packages-$BRANCH/Latest"}
 packagetree="${PACKAGESITE%/*?}"
+
+# Local index location.
+if [ -d "${PACKAGESITE%/*?}" ]; then
+	# If PACKAGESITE is a locally available direcotry, point PKG_INDEX
+	# and so forth there.
+	: ${PKG_INDEX="${PACKAGESITE%/*?}/INDEX"}
+	: ${PKG_MOVED="${PACKAGESITE%/*?}/MOVED"}
+	: ${PKG_UPDATING="${PACKAGESITE%/*?}/UPDATING"}
+else
+	# Put downloaded INDEX and so forth into /var.
+	: ${PKG_INDEX="$vardir/db/uma/FTPINDEX"}
+	: ${PKG_MOVED="$vardir/db/uma/FTPMOVED"}
+	: ${PKG_UPDATING="$vardir/db/uma/FTPUPDATING"}
+fi
 
 #
 # Generate PACKAGESITE_MIRRORS if only PACKAGEROOT_MIRRORS are given.
@@ -479,7 +488,13 @@ fi
 
 # Package index commands.
 if [ -n "$cmd_ftpindex" ]; then
-	if ! mkdir -p "${PKG_INDEX%/*}" 2> /dev/null; then
+	if [ -z "${PKG_INDEX##${PACKAGESITE%/*?}*}"  ]; then
+		if ! [ -r "$PKG_INDEX" -a -r "$PKG_MOVED" -a -r "$PKG_UPDATING" ]; then
+			test -n "$verbose" \
+				&& echo "The file '$PKG_INDEX', '$PKG_MOVED' or '$PKG_UPDATING' could not be read !"
+			errno=$((1 << ERR_FETCH_INDEX | errno))
+		fi
+	elif ! mkdir -p "${PKG_INDEX%/*}" 2> /dev/null; then
 		test -n "$verbose" \
 			&& echo "The directory ${PKG_INDEX%/*} does not exist and cannot be created!"
 		errno=$((1 << ERR_FETCH_INDEX | errno))

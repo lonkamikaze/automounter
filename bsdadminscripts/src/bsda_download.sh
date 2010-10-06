@@ -351,13 +351,16 @@ bsda:download:Manager.propagate() {
 #	The local file name.
 #
 bsda:download:Manager.createJob() {
-	local servers job
+	local servers job requestor
 	$this.getServers servers
 	# Duplicate servers object.
 	$servers.copy servers
 
+	# Get the caller.
+	$caller.getObject requestor
+
 	# Create the job.
-	bsda:download:Job job $this $servers "$2" "$3"
+	bsda:download:Job job $this $servers "$2" "$3" $requestor
 	# Return the job.
 	$caller.setvar "$1" $job
 
@@ -423,9 +426,10 @@ bsda:download:Manager.createJobs() {
 #
 # @param &1
 #	The name of the variable to hold the commpleted jobs.
-# @return
-#	Returns true (0) if there were any completed jobs,
-#	false (1) otherwise.
+# @return 0
+#	New completed jobs are returned.
+# @return 1
+#	There are no jobs to return.
 #
 bsda:download:Manager.completedJobs() {
 	local jobs
@@ -468,6 +472,8 @@ bsda:download:Manager.term() {
 
 #
 # Checks whether the background downloader is still available.
+#
+# This is not really reliable, but there is nothing better for now.
 #
 # @return
 #	True (0) if the downloader is still present, else false (1).
@@ -841,10 +847,12 @@ bsda:obj:createClass bsda:download:Servers \
 #	The master server.
 # @param @
 #	All following server instances are objects.
-# @return
-#	0 if everything goes fine
-#	1 if the master service is not a bsda:download:Server instance
-#	2 if one of the mirrors is not a bsda:download:Server instance
+# @return 0
+#	No problems occured.
+# @return 1
+#	The master server is not a bsda:download:Server instance.
+# @return 2
+#	One of the mirrors is not a bsda:download:Server instance.
 #
 bsda:download:Servers.init() {
 	local IFS mirrors
@@ -1026,6 +1034,9 @@ bsda:obj:createClass bsda:download:Job \
 	w:private:target \
 	x:public:getTarget \
 		"The local target location." \
+	w:private:requestor \
+	x:public:getRequestor \
+		"The object that requested the job." \
 	w:protected:size \
 		"The download size." \
 	w:protected:startDownloadTime \
@@ -1064,10 +1075,14 @@ bsda:obj:createClass bsda:download:Job \
 #	The remote file name.
 # @param 4
 #	The local file name.
-# @return
-#	0 if everything goes fine
-#	1 if the fisrt parameter is not a Manager instance
-#	2 if the second parameter is not a Servers instance
+# @param 5
+#	The optional requestor, this is not used by Manager.createJobs().
+# @return 0
+#	No problems occured.
+# @return 1
+#	The fisrt parameter is not a Manager instance.
+# @return 2
+#	The second parameter is not a Servers instance.
 #
 bsda:download:Job.init() {
 	# Check whether the first parameter is a Manager instance.
@@ -1080,6 +1095,7 @@ bsda:download:Job.init() {
 	$this.setServers "$2"
 	$this.setSource "$3"
 	$this.setTarget "$4"
+	$this.setRequestor "$5"
 }
 
 #
