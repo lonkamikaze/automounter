@@ -325,7 +325,7 @@ bsda:pkg:Index.identifyPackages() {
 
 		# Create File instance and read contents.
 		bsda:pkg:File file "$2"
-		if ! $file.getContents name origin null null; then
+		if ! $file.getContents name origin null null null; then
 			# Foreward errors.
 			return 1
 		fi
@@ -899,7 +899,7 @@ bsda:pkg:Index.getPackagesByNames() {
 	$this.getIndex index
 
 	# Get the origins from the index.
-	$this.search origins $bsda_pkg_IDX_PKG "$2" $bsda_pkg_IDX_ORIGIN
+	$this.search origins $bsda_pkg_IDX_PKG "$names" $bsda_pkg_IDX_ORIGIN
 	origins="$(echo "$origins" | sed "s|$prefix||1")"
 
 	# Forward the list of of origins to the getPackagesByOrigins() method.
@@ -1109,20 +1109,22 @@ bsda:pkg:File.init() {
 #
 # Returns the data in the +CONTENTS file of a package file.
 #
-# @param 1
+# @param &1
 #	The name of the variable the name should be stored in.
-# @param 2
+# @param &2
 #	The name of the variable the origin should be stored in.
-# @param 3
+# @param &3
 #	The name of the variable the dependencies, as a list of origins,
 #	should be stored in.
-# @param 4
+# @param &4
+#	The variable dependency names should be stored in.
+# @param &5
 #	The name of the variable the conflict patters should be stored in.
 # @throws bsda_pkg_ERR_PACKAGE_CONTENTS_FORMAT
 #	This error is set if the package format version is not 1.1.
 #
 bsda:pkg:File.getContents() {
-	local IFS file line format name orgin dependencies conflicts
+	local IFS file line format name orgin dependencies depNames conflicts
 
 	IFS='
 '
@@ -1132,6 +1134,7 @@ bsda:pkg:File.getContents() {
 	name=
 	origin=
 	dependencies=
+	depNames=
 	conflicts=
 
 	# Process the +CONTENTS file in the tar archive line by line.
@@ -1142,6 +1145,9 @@ bsda:pkg:File.getContents() {
 			;;
 			@conflicts\ *)
 				conflicts="$conflicts${conflicts:+$IFS}${line#@conflicts }"
+			;;
+			@pkgdep\ *)
+				depNames="$depNames${depNames:+$IFS}${line#@pkgdep }"
 			;;
 			@comment\ *)
 				line="${line#@comment }"
@@ -1165,7 +1171,8 @@ bsda:pkg:File.getContents() {
 	$caller.setvar "$1" "$name"
 	$caller.setvar "$2" "$origin"
 	$caller.setvar "$3" "$dependencies"
-	$caller.setvar "$4" "$conflicts"
+	$caller.setvar "$4" "$depNames"
+	$caller.setvar "$5" "$conflicts"
 
 	# Perform a package format check.
 	if [ "$format" != "1.1" ]; then
@@ -1192,6 +1199,14 @@ bsda:obj:createClass bsda:pkg:Package \
 		"The Index instance this Package was created by." \
 	-:dependencies \
 		"A buffer for the list of dependencies." \
+	-:update \
+		"Result buffer for the isUpdate() method." \
+	-:reinstall \
+		"Result buffer for the isReinstall() method." \
+	-:installed \
+		"Result buffer for the isInstalled() method." \
+	r:private:depNames \
+		"A list of dependency names." \
 	r:public:origin \
 		"The package origin." \
 	r:public:name \
@@ -1200,8 +1215,6 @@ bsda:obj:createClass bsda:pkg:Package \
 		"A list of package orgins moved to this package." \
 	r:private:file \
 		"The File instance this package was created from." \
-	r:private:line \
-		"The index line this package was created from." \
 	i:protected:init \
 		"The constructor, initializes all the attributes." \
 	x:public:getDependencies \
@@ -1214,8 +1227,6 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Check whether this is a reinstall without version changes." \
 	x:public:isInstalled \
 		"Check whether a version of this package is installed." \
-	x:public:sync \
-		"Synchronize a package with the download server." \
 	x:public:fetch \
 		"Fetch a package if necessary." \
 	x:public:verify \
@@ -1241,6 +1252,9 @@ bsda:obj:createClass bsda:pkg:Package \
 #	Either the File or the index line this package was created from.
 #
 bsda:pkg:Package.init() {
+	local IFS
+	IFS='
+'
 	setvar ${this}index $1
 	setvar ${this}dependencies null
 	setvar ${this}origin "$2"
@@ -1248,15 +1262,15 @@ bsda:pkg:Package.init() {
 	# Set file or index line as source.
 	if bsda:pkg:File.isInstance "$4"; then
 		setvar ${this}file "$4"
-		setvar ${this}line
+		setvar ${this}depNames
 	else
-		setvar ${this}line "$4"
 		setvar ${this}file
+		setvar ${this}depNames "$(echo "$4" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_DEPENDS | /usr/bin/sed "s/ /\\$IFS/g")"
 	fi
 }
 
 #
-# Returns the dependencies of a packages to a variable.
+# Returns the dependencies of a package to a variable.
 #
 # @param 1
 #	The name of the variable to store the list of dependencies in.
@@ -1264,7 +1278,7 @@ bsda:pkg:Package.init() {
 #	This error is set if the package format version is not 1.1.
 #
 bsda:pkg:Package.getDependencies() {
-	local file line dependencies null index
+	local file dependencies null index
 	$this.getIndex index
 
 	# Check whether the buffer is already filled.
@@ -1273,21 +1287,18 @@ bsda:pkg:Package.getDependencies() {
 
 		# Check whether a package file is available.
 		$this.getFile file
-		if bsda:pkg:File.isInstance "$file"; then
+		if [ -n "$file" ]; then
 			# A package file is available.
-			if ! $file.getContents null null dependencies null; then
+			if ! $file.getContents null null dependencies null null; then
 				# Forward errors.
 				return 1
 			fi
 			eval "$index.getPackagesByOrigins ${this}dependencies \"$dependencies\""
 		else
-			# A package file is not available, use the index line.
-			$this.getLine line
-			dependencies="$(echo "$line" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_DEPENDS | /usr/bin/rs 0 1)"
+			# A package file is not available, use the index line
+			# provided dependency names.
+			$this.getDepNames dependencies
 			eval "$index.getPackagesByNames ${this}dependencies \"$dependencies\""
-	
-			# The index line is no longer needed and just wastes memory.
-			unset ${this}line
 		fi
 	fi
 
@@ -1313,37 +1324,26 @@ bsda:pkg:Package.addMoved() {
 }
 
 #
-# Returns if this is an update to an installed package.
+# Checks if this is an update or a missing package.
 #
 # @return
-#	True (0) if this is an update, else false (1).
+#	True (0) if this is an update or missing, else false (1).
 #
 bsda:pkg:Package.isUpdate() {
-	local IFS origins origin name installedName
+	if eval "[ -z \"\$${this}update\" ]"; then
+		local IFS origins origin name installedName
 
-	IFS='
+		IFS='
 '
-	$this.getName name
-	$this.getOrigin origin
+		$this.getName name
+		$this.getOrigin origin
 
-	# This is only an update if there is an already installed package,
-	# with a version number less than this one's.
-	installedName="$(/usr/sbin/pkg_info -qO "$origin")"
-	if [ -n "$installedName" ] && [ "$(/usr/sbin/pkg_version -t "$installedName" "$name")" = "<" ]; then
-		return 0
-	fi
-
-	# If the package got moved from something already installed, always
-	# consider this an update.
-	$this.getMoved origins
-	for origin in $origins; do
+		# Treat missing packages and real updates as such.
 		installedName="$(/usr/sbin/pkg_info -qO "$origin")"
-		if [ -n "$installedName" ]; then
-			return 0
-		fi
-	done
-
-	return 1
+		test -z "$installedName" || test "$(/usr/sbin/pkg_version -t "$installedName" "$name")" = "<"
+		setvar ${this}update $?
+	fi
+	eval "return \$${this}update"
 }
 
 #
@@ -1354,10 +1354,14 @@ bsda:pkg:Package.isUpdate() {
 #	false (1) otherwise.
 #
 bsda:pkg:Package.isReinstall() {
-	local name
-	$this.getName name
-	# Returns false (1) if the name is not found.
-	/usr/sbin/pkg_info -Eq "$name"
+	if eval "[ -z \"\$${this}reinstall\" ]"; then
+		local name
+		$this.getName name
+		# Returns false (1) if the name is not found.
+		/usr/sbin/pkg_info -Eq "$name"
+		setvar ${this}reinstall $?
+	fi
+	eval "return \$${this}reinstall"
 }
 
 #
@@ -1370,50 +1374,14 @@ bsda:pkg:Package.isReinstall() {
 #	false (1) otherwise.
 #
 bsda:pkg:Package.isInstalled() {
-	local origin
-	$this.getOrigin origin
-	# Returns true (0) if the origin is found.
-	test -n "$(/usr/sbin/pkg_info -qO "$origin")"
-}
-
-#
-# Sync a package file with the download servers.
-#
-# If no download manager is present or the package is already paired with a
-# file, this will just tell the index that the file download was completed.
-#
-bsda:pkg:Package.sync() {
-	local index suffix dir downloader file job
-
-	$this.getIndex index
-
-	# Check whether this already has a file.
-	$this.getFile file
-	if [ -n "$file" ]; then
-		$index.downloadStarted
-		return 0
+	if eval "[ -z \"\$${this}installed\" ]"; then
+		local origin
+		$this.getOrigin origin
+		# Returns true (0) if the origin is found.
+		test -n "$(/usr/sbin/pkg_info -qO "$origin")"
+		setvar ${this}installed $?
 	fi
-
-	$index.getDownloader downloader
-
-	# Check for downloader.
-	if [ -z "$downloader" ]; then
-		# Nothing to be done.
-		$index.downloadStarted
-		return 0
-	fi
-
-	# Get file and path names.
-	$index.getFileSuffix suffix
-	$index.getFileDir dir
-	$this.getName file
-	file="$file$suffix"
-
-	# Dispatch the download job.
-	$downloader.createJob job "$file" "$dir/$file"
-
-	# Tell the index about this download.
-	$index.downloadStarted $job
+	eval "return \$${this}installed"
 }
 
 #
@@ -1422,8 +1390,13 @@ bsda:pkg:Package.sync() {
 # If no download manager is present or the package is already paired with a
 # file, this will just tell the index that the file download was completed.
 #
+# If the present file's dependencies do not match the INDEX line (if the
+# package was created from the INDEX), the file will be synchronized with
+# the servers.
+#
 bsda:pkg:Package.fetch() {
-	local index suffix dir downloader file job
+	local index suffix dir downloader file job presentFile depNamesExpected
+	local depNamesFile null
 
 	$this.getIndex index
 
@@ -1449,9 +1422,26 @@ bsda:pkg:Package.fetch() {
 	$this.getName file
 	file="$file$suffix"
 	if [ -r "$dir/$file" ]; then
-		# File exists, bail out.
+		# File exists, check dependencies.
 		$index.downloadStarted
-		return 0
+		$this.getDepNames depNamesExpected
+		bsda:pkg:File presentFile "$dir/$file"
+		# Get the dependency names from the present file.
+		if ! $presentFile.getContents null null null depNamesFile null; then
+			# Throw exceptions away.
+			bsda_pkg_errno=0
+		fi
+		# Throw the present file object away. Pairing would be,
+		# possible now, but then dependencies would have to be
+		# thrown instead of discarded.
+		$presentFile.delete
+		# Check whether all expected dependencies were listed by the
+		# file, with the exact same name and version.
+		if [ -z "$(echo "$depNamesExpected" | /usr/bin/grep -vxF "$depNamesFile")" ]; then
+			# Register the successful download
+			$index.downloadStarted
+			return 0
+		fi
 	fi
 		
 
