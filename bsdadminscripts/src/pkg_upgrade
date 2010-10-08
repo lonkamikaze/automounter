@@ -490,10 +490,12 @@ pu:Session.init() {
 	$this.sortPkgs
 	#$this.setupSignals
 
-#	$this.getScheduler scheduler
-#	$this.verbose "Verifying package downloads."
-#	$this.setState Verify
-#	$scheduler.run
+	if [ $(($1 & pu_FLAG_NO_ACTIONS)) -eq 0 ]; then
+		$this.getScheduler scheduler
+		$this.verbose "Verifying package downloads."
+		$this.setState Verify
+		$scheduler.run
+	fi
 
 	local IFS packages pkg
 	IFS='
@@ -503,7 +505,7 @@ pu:Session.init() {
 		$pkg.getOrigin
 	done | $4.stdout
 	$this.getPackages | wc -l | $4.stdout
-	$this.getPackages | wc -l | sort -u | $4.stdout
+	$this.getPackages | sort -u | wc -l | $4.stdout
 }
 
 pu:Session.clean() {
@@ -1074,7 +1076,7 @@ pu:Session.getNewDepending() {
 	updates=
 	requests=
 	for pkg in $2; do
-		if $pkg.isUpdate; then
+		if $pkg.isInstalled && $pkg.isUpdate; then
 			# This is an update request and thus processing
 			# depending packages is obligatory.
 			updates="${updates:+$updates$IFS}$pkg"
@@ -1106,38 +1108,72 @@ pu:Session.getNewDepending() {
 	#
 	$this.getPackages packages
 	$this.getIndex index
-	# Get all installed packages, this is what takes so long.
-	$index.identifyPackages all '*'
-	# We don't need to check the ones already listed for processing.
-	all="$(echo "$all" | /usr/bin/grep -vxF "${packages:+$packages$IFS}$2")"
-
-	# Check all remaining packages, whether they depend on the given ones.
 	depending=
-	while [ -n "$all" ]; do
-		pkg="${all%%$IFS*}"
-		all="${all#$pkg}"
-		all="${all#$IFS}"
-		$pkg.getDependencies pkgDependencies
-		if echo "$pkgDependencies" | /usr/bin/grep -qxF "${updates:-#}"; then
-			# Packages depending on uppdates always get added.
-			depending="${depending:+$depending$IFS}$pkg"
-		elif echo "$pkgDependencies" | /usr/bin/grep -qxF "${requests:-#}"; then
-			# Requests is only populated if upward recursiveness
-			# is set.
-			if [ $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+
+	if [ -n "$updates" ]; then
+		# Get all installed packages, this is what takes so long.
+		$index.getPackagesByOrigins all "$(/usr/sbin/pkg_info -qoa)"
+		# We don't need to check the ones already listed for processing.
+		all="$(echo "$all" | /usr/bin/grep -vxF "${packages:+$packages$IFS}$2")"
+
+		# Check all remaining packages, whether they depend on the given ones
+		# that are updated.
+		while [ -n "$all" ]; do
+			pkg="${all%%$IFS*}"
+			all="${all#$pkg}"
+			all="${all#$IFS}"
+			$pkg.getDependencies pkgDependencies
+			if echo "$pkgDependencies" | /usr/bin/grep -qxF "${updates:-#}"; then
+				# Packages depending on uppdates always get added.
+				depending="${depending:+$depending$IFS}$pkg"
+			else
+				# The current package does not need to be reinstalled,
+				# thus all dependencies of it do not need to either.
+				all="$(echo "$all" | /usr/bin/grep -vxF "$pkgDependencies")"
+			fi
+		done
+	fi
+
+	if [ -n "$requests" -a $((flags & pu_FLAG_FORCE)) -ne 0 ]; then
+		# Get all installed packages, this is what takes so long.
+		$index.getPackagesByOrigins all "$(/usr/sbin/pkg_info -qoa)"
+		# We don't need to check the ones already listed for processing.
+		all="$(echo "$all" | /usr/bin/grep -vxF "${packages:+$packages$IFS}${depending:+$depending$IFS}$2")"
+
+		while [ -n "$all" ]; do
+			pkg="${all%%$IFS*}"
+			all="${all#$pkg}"
+			all="${all#$IFS}"
+			$pkg.getDependencies pkgDependencies
+			if echo "$pkgDependencies" | /usr/bin/grep -qxF "${requests:-#}"; then
 				# In forced mode just add the package.
 				depending="${depending:+$depending$IFS}$pkg"
-			elif $pkg.isUpdate; then
+			else
+				# The current package does not need to be reinstalled,
+				# thus all dependencies of it do not need to either.
+				all="$(echo "$all" | /usr/bin/grep -vxF "$pkgDependencies")"
+			fi
+		done
+	elif [ -n "$requests" ]; then
+		$index.getPackagesByOrigins all "$(/usr/sbin/pkg_version -Iol\< "$PKG_INDEX" | /usr/bin/sed 's/ .*//')"
+		all="$(echo "$all" | /usr/bin/grep -vxF "${packages:+$packages$IFS}${depending:+$depending$IFS}$2")"
+
+		while [ -n "$all" ]; do
+			pkg="${all%%$IFS*}"
+			all="${all#$pkg}"
+			all="${all#$IFS}"
+			$pkg.getDependencies pkgDependencies
+			if $pkg.isUpdate; then
 				# This packe appears to be outdated, so add
 				# it.
 				depending="${depending:+$depending$IFS}$pkg"
+			else
+				# The current package does not need to be reinstalled,
+				# thus all dependencies of it do not need to either.
+				all="$(echo "$all" | /usr/bin/grep -vxF "$pkgDependencies")"
 			fi
-		else
-			# The current package does not need to be reinstalled,
-			# thus all dependencies of it do not need to either.
-			all="$(echo "$all" | /usr/bin/grep -vxF "$pkgDependencies")"
-		fi
-	done
+		done
+	fi
 
 	# Return the found depending packages.
 	$caller.setvar "$1" "$depending"

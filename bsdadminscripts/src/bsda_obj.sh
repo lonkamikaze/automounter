@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 1.15
+# version 1.16
 
 # Include once.
 test -n "$bsda_obj" && return 0
@@ -850,6 +850,16 @@ bsda_obj=1
 #
 
 #
+# This is a user tunable to turn off scope checks, which can bring
+# considerable performance gain, but should only be done with thoroughly
+# tested code.
+#
+# It has to be activated before including the framework. Changing it at
+# runtime will have no effect.
+#
+#BSDA_OBJ_NOSCOPE=
+
+#
 # The stack counter that holds the number of methods that currently
 # use the return stack.
 #
@@ -1206,8 +1216,8 @@ bsda:obj:createClass() {
 		fi
 
 		# Get inherited methods and attributes.
-		inheritedMethods="$($parent.getMethods | grep -vFx "$methods")"
-		inheritedAttributes="$($parent.getAttributes | grep -vFx "$attributes")"
+		inheritedMethods="$($parent.getMethods | /usr/bin/grep -vFx "$methods")"
+		inheritedAttributes="$($parent.getAttributes | /usr/bin/grep -vFx "$attributes")"
 
 		# Update the list of attributes.
 		attributes="$inheritedAttributes${inheritedAttributes:+${attributes:+$IFS}}$attributes"
@@ -1964,30 +1974,55 @@ bsda:obj:isSimpleFloat() {
 # @param 4
 #	A list of method names.
 #
-bsda:obj:createMethods() {
-	local method scope
-	for method in $4; do
-		scope=${method%:*}
-		eval "scope=\"\$$2$scope\""
-		# Add method name to scope.
-		eval "scope=\"$scope\""
-		method=${method##*:}
-		eval "
-			$3.$method() {
-				$scope
-				local caller
-				bsda:obj:callerSetup
-				local class this _return
-				class=$1
-				this=$3
-				$1.$method \"\$@\"
-				_return=\$?
-				bsda:obj:callerFinish
-				return \$_return
-			}
-		"
-	done
-}
+if [ -z "$BSDA_OBJ_NOSCOPE" ]; then
+	# Use the regular implementation.
+	bsda:obj:createMethods() {
+		local method scope
+		for method in $4; do
+			scope=${method%:*}
+			# Get scope check from class.
+			eval "scope=\"\$$2$scope\""
+			# Add method name to scope.
+			eval "scope=\"$scope\""
+			method=${method##*:}
+			eval "
+				$3.$method() {
+					$scope
+					local caller
+					bsda:obj:callerSetup
+					local class this _return
+					class=$1
+					this=$3
+					$1.$method \"\$@\"
+					_return=\$?
+					bsda:obj:callerFinish
+					return \$_return
+				}
+			"
+		done
+	}
+else
+	# Use the implementation without scope checks.
+	bsda:obj:createMethods() {
+		local method
+		for method in $4; do
+			method=${method##*:}
+			eval "
+				$3.$method() {
+					local caller
+					bsda:obj:callerSetup
+					local class this _return
+					class=$1
+					this=$3
+					$1.$method \"\$@\"
+					_return=\$?
+					bsda:obj:callerFinish
+					return \$_return
+				}
+			"
+		done
+	}
+fi
 
 #
 # Deletes methods from an object. This is intended to be used in a destructor.
