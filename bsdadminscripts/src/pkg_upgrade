@@ -381,6 +381,19 @@ pu_params() {
 	fi
 }
 
+#
+#
+#
+bsda:obj:createClass pu:Verify \
+	implements:bsda:scheduler:Process \
+	w:private:session \
+		"The controlling session." \
+	w:private:terminal \
+		"The terminal to use." \
+	w:private:downloader \
+		"The download manager providing the packages." \
+	w:private:packages \
+		"The list of packages to verify." \
 
 
 #
