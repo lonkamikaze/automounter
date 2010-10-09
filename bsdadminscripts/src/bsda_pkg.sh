@@ -1442,6 +1442,9 @@ bsda:pkg:Package.fetch() {
 			$index.downloadStarted
 			return 0
 		fi
+		# Remove the outdated file, to make sure that it fails if
+		# there is no network connection.
+		/bin/rm "$dir/$file"
 	fi
 		
 

@@ -608,6 +608,9 @@ bsda:download:Server.download() {
 	# The following block gets forked away, so nothing has to be declared
 	# local.
 	(
+		# Needs to be defined when signal handling is activated.
+		$job.getTarget target
+
 		# Don't let fetch block signals.
 		#
 		# The -T parameter activates asynchronous signal handling,
@@ -619,12 +622,11 @@ bsda:download:Server.download() {
 		# The -T parameter is dangerous, do not mess with it unless
 		# you know what is safe to do.
 		set -T
-		trap '/bin/kill $(jobs -s) 2> /dev/null; exit 1' sigint sigterm
+		trap '/bin/kill $(jobs -s) 2> /dev/null; wait; /bin/rm "$target" 2> /dev/null; exit 1' sigint sigterm
 
 		$this.getSender sender
 		$this.getLocation location
 		$job.getSource source
-		$job.getTarget target
 		if ! $job.getSize size; then
 			# If getting the size did not succeed, it has to be
 			# assumed that the file does not exist. Thus instantly
