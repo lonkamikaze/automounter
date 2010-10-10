@@ -1423,7 +1423,6 @@ bsda:pkg:Package.fetch() {
 	file="$file$suffix"
 	if [ -r "$dir/$file" ]; then
 		# File exists, check dependencies.
-		$index.downloadStarted
 		$this.getDepNames depNamesExpected
 		bsda:pkg:File presentFile "$dir/$file"
 		# Get the dependency names from the present file.
