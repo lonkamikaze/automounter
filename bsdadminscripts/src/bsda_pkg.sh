@@ -1303,7 +1303,12 @@ bsda:pkg:Package.getDependencies() {
 	fi
 
 	# Return the list of dependencies.
-	eval "$caller.setvar '$1' \"\$${this}dependencies\"" 
+	eval "
+	$caller.setvar '$1' \"\$${this}dependencies\"
+	$this.getDependencies() {
+		setvar '$1' \"\$${this}dependencies\" 2> /dev/null || echo \"\$${this}dependencies\"
+	}
+	"
 }
 
 #
@@ -1343,7 +1348,12 @@ bsda:pkg:Package.isUpdate() {
 		test -z "$installedName" || test "$(/usr/sbin/pkg_version -t "$installedName" "$name")" = "<"
 		setvar ${this}update $?
 	fi
-	eval "return \$${this}update"
+	eval "
+	$this.isUpdate() {
+		return \$${this}update
+	}
+	return \$${this}update
+	"
 }
 
 #
@@ -1361,7 +1371,12 @@ bsda:pkg:Package.isReinstall() {
 		/usr/sbin/pkg_info -Eq "$name"
 		setvar ${this}reinstall $?
 	fi
-	eval "return \$${this}reinstall"
+	eval "
+	$this.isReinstall() {
+		return \$${this}reinstall
+	}
+	return \$${this}reinstall
+	"
 }
 
 #
@@ -1381,7 +1396,12 @@ bsda:pkg:Package.isInstalled() {
 		test -n "$(/usr/sbin/pkg_info -qO "$origin")"
 		setvar ${this}installed $?
 	fi
-	eval "return \$${this}installed"
+	eval "
+	$this.isInstalled() {
+		return \$${this}installed
+	}
+	return \$${this}installed
+	"
 }
 
 #
