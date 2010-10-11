@@ -1,6 +1,6 @@
 This file contains a list of people I want to express my gratitude to.
 
-- Markus Schoepke and his employer webstyle (April 21, 2009)
+- Markus Schoepke and his employer webstyle (21 April 2009)
 For intense testing and feedback as well as providing me with a 
 dual quad-core machine for my own testing. On this machine I found
 and fixed numerous bugs in the conflict handling and package name
@@ -9,7 +9,7 @@ so that a user hopefully does not come to think missing dependencies
 reported by pkg_add are simply ignored.
 http://www.webstyle.ch is a provider of FreeBSD based hosting solutions.
 
-- Hannes Hauswedell (April 21, 2009)
+- Hannes Hauswedell (21 April 2009)
 For specifying the concept and requirements for UMA.
 Hannes Hauswedell is the originator of the KPorts project and a member of
 the BSDForen.de team.
