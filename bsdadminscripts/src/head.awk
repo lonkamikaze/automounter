@@ -64,7 +64,7 @@ BEGIN {
 	# Current xpos.
 	xpos = 0;
 	# Used to eat tabs after line overflow, on terminals without the
-	# newline.
+	# newline glitch.
 	eattabs = 0;
 
 	# Don't eat new lines.
