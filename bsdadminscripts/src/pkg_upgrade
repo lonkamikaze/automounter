@@ -388,12 +388,15 @@ bsda:obj:createClass pu:Verify \
 	implements:bsda:scheduler:Process \
 	w:private:session \
 		"The controlling session." \
-	w:private:terminal \
-		"The terminal to use." \
-	w:private:downloader \
-		"The download manager providing the packages." \
 	w:private:packages \
 		"The list of packages to verify." \
+	i:private:init \
+		"The constructor sets everything up." \
+
+pu:Verify.init() {
+	$this.setSession $1
+	$this.setPackages "$2"
+}
 
 
 #
@@ -408,10 +411,13 @@ bsda:obj:createClass pu:Session \
 	w:private:flags \
 		"The configuration flags." \
 	w:private:terminal \
+	x:protected:getTerminal \
 		"The Terminal object for this session." \
 	w:private:index \
+	x:protected:getIndex \
 		"The Index object for this session." \
 	w:private:downloader \
+	x:protected:getDownloader \
 		"The download manager." \
 	w:private:servers \
 		"The download servers." \
@@ -1205,20 +1211,21 @@ pu:Session.sortPkgs() {
 	#
 	$this.getPackages packages
 	$this.status "Sorting $(($(echo "$packages" | /usr/bin/wc -l))) packages ..."
+
+	#
+	# Fill each line with a package and its dependencies.
+	#
 	sorted=
 	for pkg in $packages; do
-		# Get the last dependency in the list of packages to sort.
 		$pkg.getDependencies dependencies
-		dependency="$(echo "$sorted" | /usr/bin/grep -Fx "$dependencies" | /usr/bin/tail -n1)"
-
-		# Get the last matching dependency in the list.
-		if [ -z "$dependency" ]; then
-			sorted="$pkg${sorted:+$IFS$sorted}"
-			continue
-		fi
-
-		sorted="$(echo "$sorted" | /usr/bin/sed -E "/^$dependency$/a\\$IFS$pkg$IFS")"
+		sorted="${sorted:+$sorted$IFS}$(echo $pkg $dependencies)"
 	done
+
+	#
+	# Sort the packages by dependencies. Use awk to create
+	# "<package> <dep>" pairs and pipe them to tsort.
+	#
+	sorted="$(echo "$sorted" | /usr/bin/awk '{for (i=1; i <= NF; i++) print $1 " " $i}' | /usr/bin/tsort | /usr/bin/tail -r)"
 
 	# Set the packages to the sorted list.
 	$this.setPackages "$sorted"
