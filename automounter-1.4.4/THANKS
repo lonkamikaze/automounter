@@ -1,0 +1,8 @@
+This file contains a list of people I want to express my gratitude to.
+
+- Anonymous patch contributor (11 October 2010)
+For providing a patch to avoid a devd race.
+
+- Clemens Fischer (31 August 2008)
+For pointing out a typo in the require line of the rc file.
+
