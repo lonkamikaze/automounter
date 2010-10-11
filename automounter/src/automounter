@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4.3
+version=1.4.4
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
@@ -157,6 +157,55 @@ readonly EX_SOFTWARE=70
 readonly EX_OSERR=71
 readonly EX_CANTCREAT=73
 readonly EX_TEMPFAIL=75
+
+#
+# Produces a list of geom device nodes on stdout.
+#
+# Only outputs leaf nodes that are not mounted.
+#
+# NOTE, this breaks for labels containing a pipe '|' or or colon ':'
+# character.
+#
+geomDevices() {
+	/usr/sbin/gstat -b -I0 | /usr/bin/awk '
+		# Build a device node tree.
+		NR > 2 && $10 !~ "/" {
+			# Add to list of device nodes.
+			nodes[NR] = $10;
+			# Build a tree containing device occurrences.
+			do {
+				tree[$10]++;
+				sub("[a-z.]+[0-9]*\$", "", $10);
+			} while ($10)
+		}
+		# Output leaves.
+		END {
+			for (i in nodes) {
+				if (tree[nodes[i]] == 1) {
+					print nodes[i];
+				}
+			}
+		}
+	' | /usr/bin/grep -Exv "$(
+		(/sbin/mount -p; /usr/sbin/swapinfo) | /usr/bin/sed -nE "$(
+			geomLabels | /usr/bin/sed 's|.*|s:^/dev/(&)(	+/\| +[0-9]).*:&:p|'
+		)"
+	)"
+}
+
+#
+# Produces a list of geom labels on stdout.
+#
+# The labels follow this format:
+#	<device>|<label>
+#
+geomLabels() {
+	/sbin/glabel list | /usr/bin/awk '
+		/Consumers:/ {name = 1}
+		/Geom name:/ {sub("Geom name: ", ""); printf; name = 0}
+		! name && /1. Name:/ {sub("1. Name: ", "|");print}
+	'
+}
 
 #
 # Removes a set of media links.
@@ -375,7 +424,7 @@ checkBlacklists() {
 #
 revisitNeeded() {
 	test -n "$2" && return 1
-	
+
 	# If this was alredy discovered with a different label,
 	# call for a revisit after the cleanup phase.
 	if /usr/bin/grep -q "^$device;" "$oldnodes" \
@@ -545,48 +594,19 @@ glabelDetect() {
 	# Check whether glabel based file system discovery has been disabled.
 	test "$detect_glabel" != "1" && return 0
 
-	local partitions line device label
-
-	# Create a list in the shape:
-	#
-	# device
-	# label
-	# --
-	# device
-	# label
-	# --
-	# ...
-	partitions="$(
-		/sbin/glabel list | /usr/bin/grep -A2 'Geom name: ' | \
-		/usr/bin/grep -v 'Providers:' | \
-		/usr/bin/sed -E -e 's/Geom name: (.*)/\1/1' \
-			-e 's/.*Name: (.*)/\1/1'
-	)"
+	local line device label
 
 	# Add new mounts.
-	device=
-	for line in $partitions; do
-		# A line separator is encountered, prepare everything
-		# for dealing with the next line.
-		if [ "$line" = "--" ]; then
-			device=
-			continue
-		fi
-		
-		# The current line is the device name, remember it and
-		# go on to the next line.
-		if [ -z "$device" ]; then
-			device="$line"
-			continue
-		fi
+	for line in $(geomLabels); do
+		device="${line%%|*}"
+		label="${line#*|}"
 
-		# Finally we can set up a mount.
-		label="$line"
 		# Use the device name for empty labels.
 		test -z "${label#*/}" && label="$label$device"
 
-		# This is in the list of already probed devices. Do not check
-		# the device node to be able to follow label changes.
+		# Skip probed labels. Do not check the device node
+		# in the list of probed devices to be able to follow
+		# label changes.
 		# Instead check for the device in the list of already
 		# discovered nodes.
 		if /usr/bin/grep -qFx "$label" "$probed" \
@@ -637,15 +657,7 @@ iso9660Detect() {
 	# Check whether iso9660 hard coding has been disabled.
 	test "$detect_iso9660" != "1" && return 0
 
-	local devices device label dev_pattern
-
-	# Create a list of devices.
-	devices="$(
-		/usr/sbin/gstat -b -I0 | \
-		/usr/bin/tail -n +3 | \
-		/usr/bin/sed -E 's/([[:space:]]+[0-9.]+){9}[[:space:]]*//' | \
-		/usr/bin/grep -v '/'
-	)"
+	local device label dev_pattern
 
 	# Change the iso9660_devs format into something that can be used in a
 	# case statement.
@@ -656,7 +668,7 @@ iso9660Detect() {
 	)"
 
 	# Add new mounts.
-	for device in $devices; do
+	for device in $(geomDevices); do
 		# This is in the list of already probed devices.
 		if /usr/bin/grep -qFx "$device" "$probed"; then
 			continue
@@ -707,21 +719,13 @@ probeDetect() {
 	# Check whether probing based file system discovery has been disabled.
 	test "$detect_probe" != "1" && return 0
 
-	local devices device label type mount options
+	local device label type mount options
 
 	# Reformat probe_types.
 	probe_types="$(echo "$probe_types" | /usr/bin/egrep -o '[^,]+')"
 
-	# Create a list of devices.
-	devices="$(
-		/usr/sbin/gstat -b -I0 | \
-		/usr/bin/tail -n +3 | \
-		/usr/bin/sed -E 's/([[:space:]]+[0-9.]+){9}[[:space:]]*//' | \
-		/usr/bin/grep -v '/'
-	)"
-
 	# Add new mounts.
-	for device in $devices; do
+	for device in $(geomDevices); do
 		# This is in the list of already probed devices.
 		if /usr/bin/grep -qFx "$device" "$probed"; then
 			continue
@@ -988,7 +992,7 @@ start() {
 	if [ ! -e "$pidfile" ]; then
 		/bin/cp "$static_map" "$map"
 		"%%AMD%%" -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
-			${l:+-l "$l"} "$directory" "$map" > "$pidfile" &
+			${l:+-l"$l"} "$directory" "$map" > "$pidfile" &
 	fi
 
 	if [ -n "$1" ]; then
@@ -1280,7 +1284,7 @@ case "$1" in
 		case "$2" in
 			start | update | stop | mount | umount)
 				$2 "$3"
-				return
+				return $status
 			;;
 		esac
 	;;
@@ -1295,6 +1299,12 @@ case "$1" in
 	mount)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
 		return
+	;;
+	label)
+		# Label updates should only be performed if no update is
+		# running, because they can cause races.
+		shift
+		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
 	;;
 	start | update | stop)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
