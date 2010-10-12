@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2006-2009
+# Copyright (c) 2006-2010
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,7 @@ readonly version=1.5.1
 	# Obtain script paths.
 	. /etc/defaults/rc.conf
 	for file in $rc_conf_files; {
-		test -e "$file" && . $file
+		test -e "$file" && . "$file"
 	}
 	suggested_script_paths="/etc/rc.d $local_startup"
 
@@ -58,9 +58,14 @@ listServices() {
 	# This looks a bit messy because it is not relying on a fixed amount
 	# of spaces and tabs.
 	for script_path in $script_paths; {
-		grep -Eh '#[[:space:]]*PROVIDE:[[:space:]]*' $script_path/* | \
-			sed	-e 's|#[[:space:]]*PROVIDE:[[:space:]]*||1' \
-				-e 's|[[:space:]]+||g'
+		/usr/bin/sed -nE '
+			/#[[:space:]]*PROVIDE:/{
+				s|#[[:space:]]*PROVIDE:[[:space:]]*||
+				s|[[:space:]]+|\
+|g
+				p
+			}
+		' $script_path/*
 	}
 }
 
@@ -148,36 +153,46 @@ readParams() {
 #
 runScript() {
 	# This is the regular expression to find a service.
-	provide_expr="#[[:space:]]*PROVIDE:[[:space:]]*"
-	service_expr="$provide_expr$1[[:space:]]*\$"
+	provide_expr="#[[:space:]]*PROVIDE:"
+	service_expr="$provide_expr.*[[:space:]]+$1(\$|[[:space:]]+.*)"
 
 	# Go through the list of script_paths and execute the first
 	# script that provides the wanted service.
 	for script_path in $script_paths; {
 		# Find matching scripts in this folder.
-		scripts=$(grep -El "$service_expr" $script_path/* 2> /dev/null)
+		scripts=$(/usr/bin/grep -El "$service_expr" $script_path/* 2> /dev/null)
 		for script in $scripts; {
 			# Ignore non executable scripts.
 			test -x $script || continue
 
-			# Get the name of the provided service.
-			service="$(
-				grep -E "$service_expr" "$script" | \
-					sed -E	-e "s|$provide_expr||1" \
-						-e 's|[[:space:]]+||g'
+			# Get the names of the provided services.
+			services="$(
+				/usr/bin/sed -nE "
+					/$provide_expr/{
+						s/$provide_expr[[:space:]]*//
+						H
+					}
+					\${
+						g
+						s/\n|[[:space:]]+/ /g
+						s/ \$//
+						s/^ //
+						p
+					}
+				" "$script"
 			)"
 
 			# locate mode
 			if [ "$display_mode" -eq 2 ]; then
-				echo "$service:	$script"
+				echo "$services: $script"
 				continue
 			fi
 
 			# verbose mode
 			if [ "$display_mode" -eq 1 ]; then
-				echo "$service command:	$script $command"
+				echo "$services command:	$script $command"
 				eval "$script $command"
-				echo "$service returned:	$?"
+				echo "$services returned:	$?"
 				continue
 			fi
 

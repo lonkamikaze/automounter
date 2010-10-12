@@ -311,19 +311,15 @@ pu_params() {
 			flags=$((flags | pu_FLAG_UPWARD_RECURSIVE))
 		;;
 		-s | --resume)
-			if [ -z "$1" ]; then
-				errors="${errors:+$errors$IFS}$arg The resume flag expects a session identifier to resume."
-			fi
 			if [ -n "$resume" ]; then
-				errors="${errors:+$errors$IFS}$arg Only one session can be resumed at a time."
+				errors="${errors:+$errors$IFS}$arg The resume flag has been given multiple times."
 			else
 				if  [ $((flags & pu_FLAG_KEEP_INDEX)) -ne 0 ]; then
 					errors="${errors:+$errors$IFS}$arg The keep index flag is given, even though the resume flag implies it."
 				fi
 			fi
 			flags=$((flags | pu_FLAG_KEEP_INDEX))
-			resume="$1"
-			shift
+			resume=1
 		;;
 		-v | --verbose)
 			if  [ $((flags & pu_FLAG_VERBOSE)) -ne 0 ]; then
@@ -340,7 +336,7 @@ pu_params() {
 			fi
 			flags=$((flags | pu_FLAG_EXIT_ON_CONFLICT))
 		;;
-		--orgin=* | --resume=*)
+		--orgin=*)
 			# Split long flags that expect parameters.
 			set -- "${arg%%=*}" "${arg#*=}" "$@"
 		;;
