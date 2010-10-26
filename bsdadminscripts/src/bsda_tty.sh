@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 0.99
+# version 0.999
 
 # Include once.
 test -n "$bsda_tty" && return 0
@@ -31,9 +31,9 @@ bsda_tty=1
 
 #
 # A package for controlling the terminal and mixing status output on
-# /dev/tty with regular output on /dev/stdout and /dev/stderr in such
-# a way that the using code does not have to know whether /dev/stdout
-# and /dev/stderr are the terminal or a file.
+# /dev/tty with regular output on /dev/stdout and /dev/stderr.
+#
+# Output duplication has been removed in favour of tee(1).
 #
 # Tested on:
 #	TERM		ISSUES
@@ -1021,10 +1021,6 @@ bsda:tty:Terminal.line() {
 # The text to output can be given as command arguments or through a pipe.
 # Arguments take precedence over piped input.
 #
-# Regardless, whether stdout is redirected or not, the output will also appear
-# on the terminal unless the output was too long to display on the terminal in
-# one chunk.
-#
 # Double wide multibyte characters might break this.
 #
 # @param @
@@ -1113,60 +1109,10 @@ bsda:tty:Terminal.stdout() {
 			# the output will end.
 			/usr/bin/tput AL $lines > /dev/tty
 
-			# Draw the output and the status lines, in case they
-			# got moved out of the terminal window.
-			echo -n "$draw$buffer" > /dev/tty
-
-			# Go to the beginning of the status lines, save cursor,
-			# go up to where output should start.
-			/usr/bin/tput cr $(test $count -gt 1 && /usr/bin/jot -b up $((count - 1))) \
-				sc $(/usr/bin/jot -b up $lines) > /dev/tty
-
-			# Finally put the output on stdout.
+			# Put the output on stdout.
 			echo -n "$draw"
-
-			# Restore cursor position, in case the output was
-			# redirected.
-			/usr/bin/tput rc > /dev/tty
-		done
-	elif [ -n "$active" -a $maxli -gt 1 ]; then
-		# We are not visible, but active. I.e. perform output duplication.
-
-		# One line is needed to place the cursor there after printing.
-		maxli=$((maxli - 1))
-
-		# Output output chunks until nothing is left to output.
-		while [ -n "$output" ]; do
-			# Get the lines to output this round.
-			draw="$(
-				echo -n "$output" \
-					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
-				echo -n .$?
-			)"
-			# The number of lines is returned by the script.
-			lines="${draw##*.}"
-			draw="${draw%.*}"
-
-			# Filter characters that might endanger glob pattern
-			# substitution.
-			discard="$(echo "$draw." | /usr/bin/tr '#[]*{}' '??????')"
-			discard="${discard%.}"
-
-			# Remove the current draw from the remaining output.
-			output="${output#$discard}"
-
-			# Draw the output.
-			echo -n "$draw" > /dev/tty
-
-			# Save the cursor position and go up to where output
-			# should start.
-			/usr/bin/tput sc $(jot -b up $lines) > /dev/tty
-
-			# Finally put the output on stdout.
-			echo -n "$draw"
-
-			# Restore cursor position, in case the output was
-			# redirected.
+			/usr/bin/tput sc > /dev/tty
+			echo -n "$buffer" > /dev/tty
 			/usr/bin/tput rc > /dev/tty
 		done
 	else
