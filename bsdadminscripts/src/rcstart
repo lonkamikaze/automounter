@@ -22,7 +22,7 @@
 #
 
 readonly name=rcstart
-readonly version=1.5.1
+readonly version=1.5.2
 
 # Get a list of all startup script paths.
 {

@@ -377,23 +377,175 @@ pu_params() {
 	fi
 }
 
+bsda:obj:createInterface pu:Stage \
+	extends:bsda:scheduler:Process \
+	x:resume \
+		"Performs special operations after a resume." \
+	x:panic \
+		"Should make sure that the object is in a serializable state," \
+		"i.e. not reference any missing objects." \
+
+
 #
 #
 #
 bsda:obj:createClass pu:Verify \
 	implements:bsda:scheduler:Process \
+	w:private:sleeper \
+		"A sleeping process, so this doesn't eat a whole core when" \
+		"waiting for downloads." \
 	w:private:session \
 		"The controlling session." \
+	w:private:statusJob \
+		"The last displayed download job." \
 	w:private:packages \
 		"The list of packages to verify." \
+	w:private:failed \
+		"The list of failed packages." \
 	i:private:init \
 		"The constructor sets everything up." \
+	c:private:clean \
+		"Delete private objects." \
 
 pu:Verify.init() {
-	$this.setSession $1
-	$this.setPackages "$2"
+	local session
+	$caller.getObject session
+	$this.setSession $session
+	$this.setPackages "$1"
+	$session.verbose "Verifying packages."
+	bsda:scheduler:Sleep ${this}sleeper 1
 }
 
+pu:Verify.clean() {
+	local sleeper
+	$this.getSleeper sleeper
+	$sleeper.delete
+}
+
+pu:Verify.resume() {
+	local IFS packages failed pkg
+	IFS='
+'
+
+	$this.getFailed failed
+	# Request download for failed packages.
+	for pkg in $failed; do
+		$pkg.fetch
+	done
+	# Reschedule previously failed packages.
+	$this.getPackages packages
+	$this.setPackages "$packages${packages:+${failed:+$IFS}}$failed"
+}
+
+pu:Verify.panic() {
+	local sleeper
+
+	# Reset the sleeper.
+	$this.getSleeper sleeper
+	$sleeper.stop
+
+	# It's not guaranteed that the job still exists, so get rid of it.
+	$this.setStatusJob
+}
+
+pu:Verify.run() {
+	local IFS session sleeper
+	IFS='
+'
+
+	# Make sure this only runs every second.
+	$this.getSleeper sleeper
+	$sleeper.run
+
+	$this.getSession session
+
+	#
+	# Verify completed downloads.
+	#
+	local index packages downloads
+
+	# Get the list of packages yet to verify.
+	$this.getPackages packages
+	# Get the completed downloads.
+	$session.getIndex index
+	if $index.completedDownloads downloads; then
+		local file pkg failed
+		# Verify each package that was returned.
+		for pkg in $downloads; do
+			if ! $pkg.verify file; then
+				case $bsda_pkg_errno in
+				$bsda_pkg_ERR_FILE_MISSING)
+					$session.error $pu_ERR_FETCH "Downloading the file '$file' failed."
+				;;
+				$bsda_pkg_ERR_FILE_INVALID)
+					$session.error $pu_ERR_FETCH "The file '$file' is not a valid package."
+				;;
+				*)
+					$session.error -1 "Unexpected error in line $LINENO."
+				;;
+				esac
+				$this.getFailed failed
+				$this.setFailed "${failed:+$failed$IFS}$pkg"
+				bsda_pkg_errno=
+			else
+				$session.verbose "Downloading package file '${file##*/}' completed."
+			fi
+		done
+		# Remove the completed packages from the todo list.
+		packages="$(echo "$packages" | /usr/bin/grep -vxF "$downloads")"
+		$this.setPackages "$packages"
+	fi
+
+	# No packages left to verify?
+	if [ -z "$packages" ]; then
+		# Leave this state.
+		$session.changeState
+		return
+	fi
+
+	#
+	# Show download status if available.
+	#
+	local downloader
+
+	# Display donwload stats, but only if there is a downloader and no
+	# downloads have been verified.
+	$session.getDownloader downloader
+	if [ -n "$downloader" -a -z "$downloads" ]; then
+		local null jobs statusJob speed full terminal file size
+		local progress line
+		# Get the terminal for the formatting functions.
+		$session.getTerminal terminal
+		# Get the currently running downloads.
+		$downloader.getStatus null null null jobs
+
+		# Get the currently displayed download.
+		$this.getStatusJob statusJob
+		# Remove the download if it's no longer active.
+		statusJob="$(echo "$jobs" | /usr/bin/grep -Fx "$statusJob")"
+		# Pick the first running download if the old job was unqueued.
+		statusJob="${statusJob:-${jobs%%$IFS*}}"
+		# Store this job.
+		$this.setStatusJob
+
+		# Display a job, if one is active.
+		if [ -n "$statusJob" ]; then
+			$statusJob.getStatus file size full null null progress speed
+			$terminal.convertBytes speed unit "$speed" 4
+			speed="$speed ${unit}b/s"
+			$terminal.convertBytes full unit "$full" 4
+			full="$full ${unit}b"
+			$terminal.convertBytesToUnit size "$unit" "$size" 4
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
+			$session.status "$line"
+		else
+			$session.status "Waiting for downloads ..."
+		fi
+	fi
+}
+
+pu:Verify.stop() {
+}
 
 #
 # An instance of this class represents a pkg_upgrade session.
@@ -405,6 +557,7 @@ bsda:obj:createClass pu:Session \
 	w:private:signal \
 		"Is set to a signal if one was trapped." \
 	w:private:flags \
+	x:protected:getFlags \
 		"The configuration flags." \
 	w:private:terminal \
 	x:protected:getTerminal \
@@ -420,13 +573,9 @@ bsda:obj:createClass pu:Session \
 	w:private:scheduler \
 		"The scheduler to use." \
 	w:private:state \
-		"The current state of the Session." \
+		"The current state of the Session, required for resume." \
 	w:private:packages \
 		"A list of bsda:pkg:Package instances to process." \
-	w:private:stateData \
-		"Data storage for the currently running state." \
-	w:private:stateStatus \
-		"Status storage for the currently running state." \
 	w:private:unindexed \
 		"A list of installed origins that could not be returned" \
 		"by the INDEX." \
@@ -464,20 +613,18 @@ bsda:obj:createClass pu:Session \
 		"packages." \
 	x:private:sortPkgs \
 		"Sortst the list of packages by dependency." \
-	x:private:error \
+	x:protected:error \
 		"Outputs an error message and sets errno." \
-	x:private:warn \
+	x:protected:warn \
 		"Outputs a warning." \
-	x:private:verbose \
+	x:protected:verbose \
 		"Produce verbose output." \
-	x:private:status \
+	x:protected:status \
 		"Produce status output." \
 	x:private:uma \
 		"Calls UMA with the given parameters." \
-	x:private:runVerify \
-		"Run this in Verify state." \
-	x:private:runStop \
-		"Run this in Stop state." \
+	x:protected:changeState \
+		"Called by a state to request a state change." \
 
 #
 # @param 1
@@ -505,12 +652,9 @@ pu:Session.init() {
 	$this.sortPkgs
 	#$this.setupSignals
 
-	if [ $(($1 & pu_FLAG_NO_ACTIONS)) -eq 0 ]; then
-		$this.getScheduler scheduler
-		$this.verbose "Verifying package downloads."
-		$this.setState Verify
-		$scheduler.run
-	fi
+	$this.getScheduler scheduler
+	$this.changeState
+	$scheduler.run
 
 	local IFS packages pkg
 	IFS='
@@ -556,12 +700,6 @@ pu:Session.setupScheduler() {
 	# Create the scheduler.
 	bsda:scheduler:RoundTripScheduler scheduler
 	$this.setScheduler $scheduler
-
-	# Create a sleeper job.
-	bsda:scheduler:Sleep sleeper 1
-
-	$scheduler.register $sleeper
-	$scheduler.register $this
 }
 
 pu:Session.setupLock() {
@@ -1267,93 +1405,31 @@ pu:Session.run() {
 	#TODO signal handling
 
 	# Run the current job.
-	$this.getState state
-	$this.run$state
+	#$this.getState state
+	#$this.run$state
 }
 
-pu:Session.runVerify() {
-	local IFS index packages verified downloads pkg file errno
-	local downloader null jobs job statusJob terminal speed unit
-	local size progress line
-	IFS='
-'
+pu:Session.changeState() {
+	local state packages errno scheduler
 
-	# Show download status if available.
-	$this.getDownloader downloader
-	if [ -n "$downloader" ]; then
-		$downloader.run
-		$downloader.getStatus null null null jobs
-		$this.getStateStatus statusJob
-		$this.getTerminal terminal
-		statusJob="$(echo "$jobs" | /usr/bin/grep -Fx "$statusJob")"
-		# Pick one job to be displayed.
-		if [ -z "$statusJob" ]; then
-			statusJob="${jobs%%$IFS*}"
-		fi
-		$this.setStateStatus $statusJob
-		# Display a job, if one is active.
-		if [ -n "$statusJob" ]; then
-			$statusJob.getStatus file size full null null progress speed
-			$terminal.convertBytes speed unit "$speed" 4
-			speed="$speed ${unit}b/s"
-			$terminal.convertBytes full unit "$full" 4
-			full="$full ${unit}b"
-			$terminal.convertBytesToUnit size "$unit" "$size" 4
-			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
-			$this.status "$line"
-		else
-			$this.status "Waiting for downloads ..."
-		fi
-	fi
-	
-	#
-	# Verify completed downloads.
-	#
-	$this.getIndex index
+	$this.getState state
 	$this.getPackages packages
-	$this.getStateData verified
+	$this.getErrno errno
+	$this.getScheduler scheduler
 
-	# Check for newly completed downloads.
-	if $index.completedDownloads downloads; then
-		# Verify each package that was returned.
-		for pkg in $downloads; do
-			if ! $pkg.verify file; then
-				case $bsda_pkg_errno in
-				$bsda_pkg_ERR_FILE_MISSING)
-					$this.error $pu_ERR_FETCH "Downloading the file '$file' failed."
-				;;
-				$bsda_pkg_ERR_FILE_INVALID)
-					$this.error $pu_ERR_FETCH "The file '$file' is not a valid package."
-				;;
-				*)
-					$this.error -1 "Unexpected error in line $LINENO."
-				;;
-				esac
-				bsda_pkg_errno=
-			else
-				$this.verbose "Downloading package file '${file##*/}' completed."
-			fi
-		done
-		verified="${verified:+$verified$IFS}$downloads"
+	# Need to check error status and either change state or create a
+	# snapshot for resume.
+
+	if [ -z "$state" ]; then
+		pu:Verify state "$packages"
+		$scheduler.register $state
+	elif pu:Verify.isInstance $state; then
+		$scheduler.unregister $state
+		$state.delete
+		state=
 	fi
 
-	$this.setStateData "$verified"
-
-	# Check if this state is completed.
-	if [ -z "$(echo "$packages" | /usr/bin/grep -vxF "$verified")" ]; then
-		# If an error occured it's time to end this.
-		$this.getErrno errno
-		if [ $errno -ne 0 ]; then
-			# Move to the next state.
-			$this.setState Stop
-		else
-			# Move to the next state.
-			$this.setState Stop
-		fi
-		# Clean up.
-		$this.setStateData
-		$this.setStateStatus
-	fi
+	$this.setState $state
 }
 
 pu:Session.runStop() {

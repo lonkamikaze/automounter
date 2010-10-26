@@ -82,6 +82,10 @@ bsda:obj:createInterface bsda:scheduler:Scheduler \
 # run calls. If the time passed between two calls is greater than the sleeping
 # interval, the process will not sleep at all.
 #
+# Note that the time between successive sleep calls should be short enough to
+# ensure that a PID does not get reused. This is relevant when serializing
+# and reusing a Sleep instance - call the stop() method before doing so.
+#
 bsda:obj:createClass bsda:scheduler:Sleep \
 	implements:bsda:scheduler:Process \
 	w:private:sleepPID \
@@ -122,7 +126,7 @@ bsda:scheduler:Sleep.run() {
 }
 
 #
-# Does nothing.
+# Puts the sleeper back into a safe state.
 #
 bsda:scheduler:Sleep.stop() {
 	# Reset the sleeping PID.

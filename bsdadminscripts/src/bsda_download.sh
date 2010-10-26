@@ -1039,6 +1039,7 @@ bsda:obj:createClass bsda:download:Job \
 	w:private:requestor \
 	x:public:getRequestor \
 		"The object that requested the job." \
+		"TODO remove?" \
 	w:protected:size \
 		"The download size." \
 	w:protected:startDownloadTime \
