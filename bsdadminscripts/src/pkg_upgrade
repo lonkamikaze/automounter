@@ -396,7 +396,7 @@ bsda:obj:createClass pu:Verify \
 		"waiting for downloads." \
 	w:private:session \
 		"The controlling session." \
-	w:private:statusJob \
+	w:private:statusJobs \
 		"The last displayed download job." \
 	w:private:packages \
 		"The list of packages to verify." \
@@ -412,6 +412,7 @@ pu:Verify.init() {
 	$caller.getObject session
 	$this.setSession $session
 	$this.setPackages "$1"
+	$session.status "Waiting for downloads ..."
 	$session.verbose "Verifying packages."
 	bsda:scheduler:Sleep ${this}sleeper 1
 }
@@ -423,15 +424,15 @@ pu:Verify.clean() {
 }
 
 pu:Verify.resume() {
-	local IFS packages failed pkg
+	local IFS session index packages failed
 	IFS='
 '
 
 	$this.getFailed failed
+	$this.getSession session
+	$session.getIndex index
 	# Request download for failed packages.
-	for pkg in $failed; do
-		$pkg.fetch
-	done
+	$index.fetch "$failed"
 	# Reschedule previously failed packages.
 	$this.getPackages packages
 	$this.setPackages "$packages${packages:+${failed:+$IFS}}$failed"
@@ -469,6 +470,8 @@ pu:Verify.run() {
 	# Get the completed downloads.
 	$session.getIndex index
 	if $index.completedDownloads downloads; then
+		$session.status "Verifying packages ..."
+
 		local file pkg failed
 		# Verify each package that was returned.
 		for pkg in $downloads; do
@@ -488,7 +491,7 @@ pu:Verify.run() {
 				$this.setFailed "${failed:+$failed$IFS}$pkg"
 				bsda_pkg_errno=
 			else
-				$session.verbose "Downloading package file '${file##*/}' completed."
+				$session.verbose "Verifying package file '${file##*/}' completed."
 			fi
 		done
 		# Remove the completed packages from the todo list.
@@ -512,25 +515,26 @@ pu:Verify.run() {
 	# downloads have been verified.
 	$session.getDownloader downloader
 	if [ -n "$downloader" -a -z "$downloads" ]; then
-		local null jobs statusJob speed full terminal file size
+		local null jobs statusJobs speed full terminal file size
 		local progress line
 		# Get the terminal for the formatting functions.
 		$session.getTerminal terminal
 		# Get the currently running downloads.
 		$downloader.getStatus null null null jobs
 
-		# Get the currently displayed download.
-		$this.getStatusJob statusJob
-		# Remove the download if it's no longer active.
-		statusJob="$(echo "$jobs" | /usr/bin/grep -Fx "$statusJob")"
-		# Pick the first running download if the old job was unqueued.
-		statusJob="${statusJob:-${jobs%%$IFS*}}"
-		# Store this job.
-		$this.setStatusJob
+		# Get the currently remembered downloads.
+		$this.getStatusJobs statusJobs
+		# Remove the downloads that are not running.
+		statusJobs="$(echo "$statusJobs" | /usr/bin/grep -Fx "$jobs")"
+		# Append the currently running jobs, this way long running
+		# jobs move to the front.
+		statusJobs="$(echo "$statusJobs${statusJobs:+${jobs:+$IFS}}$jobs" | /usr/bin/awk '!occured[$0]++')"
+		# Store list of displayable jobs.
+		$this.setStatusJobs "$statusJobs"
 
-		# Display a job, if one is active.
-		if [ -n "$statusJob" ]; then
-			$statusJob.getStatus file size full null null progress speed
+		# Display the first job.
+		if [ -n "$statusJobs" ]; then
+			${statusJobs%%$IFS*}.getStatus file size full null null progress speed
 			$terminal.convertBytes speed unit "$speed" 4
 			speed="$speed ${unit}b/s"
 			$terminal.convertBytes full unit "$full" 4
@@ -538,8 +542,6 @@ pu:Verify.run() {
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
 			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
 			$session.status "$line"
-		else
-			$session.status "Waiting for downloads ..."
 		fi
 	fi
 }
@@ -933,9 +935,7 @@ pu:Session.setupPkgs() {
 	$this.setPackages "$packages"
 
 	# Start downloads.
-	for pkg in $packages; do
-		$pkg.fetch
-	done
+	$index.fetch "$packages"
 
 	# Return false if an error occured.
 	$this.getErrno errno
@@ -1041,23 +1041,25 @@ pu:Session.updateAll() {
 	$this.getPackages packages
 	$index.getPackagesByOrigins pkgs "$origins"
 	# Remove duplicates.
-	pkgs="$(echo "$pkgs" | grep -vxF "$packages")"
+	pkgs="$(echo "$pkgs" | /usr/bin/grep -vxF "$packages")"
 	$this.setPackages "$(echo "$packages${packages:+${pkgs:+$IFS}}$pkgs")"
 
+	$this.status "Dispatching $(($(echo "$pkgs" | /usr/bin/wc -w))) package downloads."
 	
 	# Start downloads for new packages.
-	for pkg in $pkgs; do
-		$pkg.fetch
-	done
+	$index.fetch "$pkgs"
 }
 
 pu:Session.updateDependencies() {
-	local IFS flags dependencies depending packages pkg
+	local IFS flags dependencies depending packages index
 
 	$this.verbose "Performing dependency checks."
 
 	IFS='
 '
+
+	# Get the INDEX access object.
+	$this.getIndex index
 
 	# Start with all packages currently enlisted.
 	$this.getPackages packages
@@ -1085,9 +1087,7 @@ pu:Session.updateDependencies() {
 	while [ -n "$depending$dependencies" ]; do
 		if [ -n "$dependencies" ]; then
 			# Download new dependencies.
-			for pkg in $dependencies; do
-				$pkg.fetch
-			done
+			$index.fetch "$dependencies"
 			# Get upward dependencies for the new dependencies.
 			$this.getNewDepending depending "$dependencies"
 			packages="$packages${packages:+${dependencies:+$IFS}}$dependencies"
@@ -1096,9 +1096,7 @@ pu:Session.updateDependencies() {
 		fi
 		if [ -n "$depending" ]; then
 			# Download new upward dependencies.
-			for pkg in $depending; do
-				$pkg.fetch
-			done
+			$index.fetch "$dependencies"
 			# Get dependencies for the new upward dependencies.
 			$this.getNewDependencies dependencies "$depending"
 			packages="$packages${packages:+${depending:+$IFS}}$depending"
@@ -1388,8 +1386,9 @@ pu:Session.verbose() {
 	eval "
 	if [ \$((${this}flags & pu_FLAG_VERBOSE)) -ne 0 ]; then
 		\$${this}terminal.stdout \"\$1\"
+	else
+		\$${this}terminal.line 0 \"\${1%.} ...\"
 	fi
-	\$${this}terminal.line 0 \"\${1%.} ...\"
 	"
 }
 

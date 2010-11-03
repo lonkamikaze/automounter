@@ -175,6 +175,8 @@ bsda:obj:createClass bsda:pkg:Index \
 		"Called by a Package to notify about a started download." \
 	x:public:completedDownloads \
 		"Returns a list of newly downloaded packages." \
+	x:public:fetch \
+		"Mass-fetches packages." \
 
 #
 # The constructor for an index interface object.
@@ -1086,6 +1088,97 @@ bsda:pkg:Index.completedDownloads() {
 }
 
 #
+# Take a list of Package instances and download them.
+#
+# This is faster than fetching individual packages because locking the message
+# queue for writing is a heavy operation and this way it only has to be done
+# once for all packages.
+#
+# @param 1
+#	A newline seperated list of Package instances.
+#
+bsda:pkg:Index.fetch() {
+	local IFS pkg files download keep files suffix dir file downloader
+	local jobs chunk packages completed downloads
+
+	IFS='
+'
+
+	# Get the downloader.
+	$this.getDownloader downloader
+	# Get file name information.
+	$this.getFileSuffix suffix
+	$this.getFileDir dir
+	# Initialize the lists of completed and running downloads.
+	$this.getDownloadsCompleted completed
+	$this.getDownloads downloads
+
+	# Break the packages into chunks of 50 so the background downloader
+	# can start picking up packages while processing is still going on.
+	packages="$1"
+	while [ -n "$packages" ]; do
+		# Get the chunk.
+		chunk="$(echo "$packages" | /usr/bin/head -n 50)"
+		packages="${packages#$chunk}"
+		packages="${packages#$IFS}"
+	
+		# Create a list of packages to download.
+		keep=
+		download=
+		for pkg in $chunk; do
+			if $pkg.fetchRequired; then
+				download="$download$IFS$pkg"
+			else
+				keep="$keep$IFS$pkg"
+			fi
+		done
+		download="${download#$IFS}"
+		keep="${keep#$IFS}"
+
+		# Record files to keep.
+		completed="$completed${completed:+${keep:+$IFS}}$keep"
+
+		# Nothing to download.
+		if [ -z "$download" ]; then
+			continue
+		fi
+
+		# Assemble <remote file> <local file> pairs for job batch creation.
+		jobs=
+		for pkg in $download; do
+			$pkg.getName file
+			file="$file$suffix"
+			jobs="$jobs$IFS$file$IFS$dir/$file"
+		done
+		jobs="${jobs#$IFS}"
+
+		# Dispatch jobs.
+		$downloader.createJobs jobs $jobs
+
+		# Compose a list of dispatched downloads.
+		download="$(
+			echo "$jobs${jobs:+${download:+$IFS}}$download" \
+				| /usr/bin/awk '
+				lines[count++] = $0 {}
+				END {
+					for (i = 0; i < count / 2; i++) {
+						print lines[i] "|" lines[i+count/2];
+					}
+				}
+			'
+		)"
+
+		# Record download requests.
+		downloads="$downloads${downloads:+${download:+$IFS}}$download"
+	done
+
+	# Save the list of completed/kept downloads.
+	$this.setDownloadsCompleted "$completed"
+	# Save the list requested downloads.
+	$this.setDownloads "$downloads"
+}
+
+#
 # An instance of this class represents a package file.
 #
 bsda:obj:createClass bsda:pkg:File \
@@ -1229,6 +1322,8 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Check whether a version of this package is installed." \
 	x:public:fetch \
 		"Fetch a package if necessary." \
+	x:protected:fetchRequired \
+		"Returns whether fetching the package is necessary." \
 	x:public:verify \
 		"Verify the package file and adopt it." \
 
@@ -1415,16 +1510,49 @@ bsda:pkg:Package.isInstalled() {
 # the servers.
 #
 bsda:pkg:Package.fetch() {
-	local index suffix dir downloader file job presentFile depNamesExpected
-	local depNamesFile null
+	local index downloader job suffix dir file
 
 	$this.getIndex index
+
+	# Check whether fetching is required.
+	if $this.fetchRequired; then
+		# Fetching is required.
+
+		# Dispatch the download job.
+		$index.getDownloader downloader
+		$index.getFileSuffix suffix
+		$index.getFileDir dir
+		$this.getName file
+		file="$file$suffix"
+		$downloader.createJob job "$file" "$dir/$file"
+		setvar ${this}download $job
+
+		# Tell the index about this download.
+		$index.downloadStarted $job
+	else
+		# Fetching is not required.
+
+		# Report the completed download.
+		$index.downloadStarted
+	fi
+}
+
+#
+# Returns whether a package needs to be fetched.
+#
+# @return 0 (true)
+#	In case a download is required.
+# @return 1 (false)
+#	In case a download is not required.
+#
+bsda:pkg:Package.fetchRequired() {
+	local index suffix dir downloader file presentFile depNamesExpected
+	local depNamesFile null
 
 	# Check whether this already has a file.
 	$this.getFile file
 	if [ -n "$file" ]; then
-		$index.downloadStarted
-		return 0
+		return 1
 	fi
 
 	$index.getDownloader downloader
@@ -1432,11 +1560,11 @@ bsda:pkg:Package.fetch() {
 	# Check for downloader.
 	if [ -z "$downloader" ]; then
 		# Nothing to be done.
-		$index.downloadStarted
-		return 0
+		return 1
 	fi
 
 	# Get file and path names.
+	$this.getIndex index
 	$index.getFileSuffix suffix
 	$index.getFileDir dir
 	$this.getName file
@@ -1451,28 +1579,22 @@ bsda:pkg:Package.fetch() {
 			bsda_pkg_errno=0
 		fi
 		# Throw the present file object away. Pairing would be,
-		# possible now, but then dependencies would have to be
+		# possible now, but then exceptions would have to be
 		# thrown instead of discarded.
 		$presentFile.delete
 		# Check whether all expected dependencies were listed by the
 		# file, with the exact same name and version.
 		if [ -z "$(echo "$depNamesExpected" | /usr/bin/grep -vxF "$depNamesFile")" ]; then
-			# Register the successful download
-			$index.downloadStarted
-			return 0
+			# No download required.
+			return 1
 		fi
 		# Remove the outdated file, to make sure that it fails if
 		# there is no network connection.
 		/bin/rm "$dir/$file"
 	fi
-		
 
-	# Dispatch the download job.
-	$downloader.createJob job "$file" "$dir/$file"
-	setvar ${this}download $job
-
-	# Tell the index about this download.
-	$index.downloadStarted $job
+	# A download is required.
+	return 0
 }
 
 #

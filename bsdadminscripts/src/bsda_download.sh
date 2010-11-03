@@ -120,7 +120,7 @@ bsda:download:Manager.init() {
 	fi
 
 	# Create a message queue.
-	bsda:messaging:FileSystemMessenger ${this}messenger "$bsda_download_tmp/$this"
+	bsda:messaging:PairMessenger ${this}messenger "$bsda_download_tmp/$this"
 
 	# Fork away the background downloader.
 	$this.downloader &
@@ -210,6 +210,13 @@ bsda:download:Manager.runController() {
 	IFS='
 '
 
+	# Only deserialize the latest version of each object.
+	# WARN: This code relies on the serialize format!
+	lines="$(
+		echo "$lines" \
+			| /usr/bin/awk '{lines[$2] = $0} END {for (line in lines) print lines[line]}'
+	)"
+
 	$this.getCompletedJobs jobs
 	for line in $lines; do
 		# Deserialize objects.
@@ -233,8 +240,7 @@ bsda:download:Manager.runController() {
 # Update objects from the queue and register jobs to the scheduler.
 #
 bsda:download:Manager.runDownloader() {
-	local IFS messenger line lines count object scheduler controllerPID
-	local jobQueue
+	local IFS messenger line count object scheduler controllerPID jobQueue
 
 	IFS='
 '
@@ -248,16 +254,13 @@ bsda:download:Manager.runDownloader() {
 		return
 	fi
 
+	# Get a line from the messenger.
 	$this.getMessenger messenger
-	$messenger.receive lines count
-
-	# Nothing returned, skip the rest.
-	if [ $count -eq 0 ]; then
-		return 0
-	fi
-
 	$this.getJobQueue jobQueue
-	for line in $lines; do
+	$messenger.receiveLine line count 
+
+	# Proceed until no more lines are available.
+	while [ $count -gt 0 ];  do
 		# Deserialize objects or execute remote commands.
 		bsda:obj:deserialize object "$line"
 
@@ -265,7 +268,13 @@ bsda:download:Manager.runDownloader() {
 		if bsda:download:Job.isInstance "$object"; then
 			$object.setScheduler $jobQueue
 			$jobQueue.register "$object"
+			# Dispatching jobs takes precendence over reading
+			# messages, so stop.
+			break
 		fi
+
+		# Get the next line.
+		$messenger.receiveLine line count 
 	done
 }
 
@@ -351,7 +360,7 @@ bsda:download:Manager.propagate() {
 #	The local file name.
 #
 bsda:download:Manager.createJob() {
-	local servers job requestor
+	local servers job
 	$this.getServers servers
 	# Duplicate servers object.
 	$servers.copy servers
@@ -360,7 +369,7 @@ bsda:download:Manager.createJob() {
 	$caller.getObject requestor
 
 	# Create the job.
-	bsda:download:Job job $this $servers "$2" "$3" $requestor
+	bsda:download:Job job $this $servers "$2" "$3"
 	# Return the job.
 	$caller.setvar "$1" $job
 
@@ -931,7 +940,7 @@ bsda:download:Servers.popMirror() {
 
 	# Try to return a free mirror.
 	$this.getMirrors mirrors
-	for mirror in $mirrors; do
+	for mirror in $(echo "$mirrors" | /usr/games/random -f -); do
 		if $mirror.isAvailable; then
 			# Return the mirror.
 			$caller.setvar "$1" "$mirror"
@@ -1036,10 +1045,6 @@ bsda:obj:createClass bsda:download:Job \
 	w:private:target \
 	x:public:getTarget \
 		"The local target location." \
-	w:private:requestor \
-	x:public:getRequestor \
-		"The object that requested the job." \
-		"TODO remove?" \
 	w:protected:size \
 		"The download size." \
 	w:protected:startDownloadTime \
@@ -1078,8 +1083,6 @@ bsda:obj:createClass bsda:download:Job \
 #	The remote file name.
 # @param 4
 #	The local file name.
-# @param 5
-#	The optional requestor, this is not used by Manager.createJobs().
 # @return 0
 #	No problems occured.
 # @return 1
@@ -1098,7 +1101,6 @@ bsda:download:Job.init() {
 	$this.setServers "$2"
 	$this.setSource "$3"
 	$this.setTarget "$4"
-	$this.setRequestor "$5"
 }
 
 #
