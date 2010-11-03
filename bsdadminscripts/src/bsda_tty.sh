@@ -1048,7 +1048,7 @@ bsda:tty:Terminal.stdout() {
 	output="${output%$IFS}$IFS"
 
 	#
-	# Get all the stuff needed to know for output duplication.
+	# Get all the stuff needed to know for flicker free output.
 	#
 	maxli=0
 	if [ -n "$active" ]; then

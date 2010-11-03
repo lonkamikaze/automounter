@@ -72,6 +72,8 @@ fi
 # FTP communication.
 : ${FTP_PASSIVE_MODE=yes}
 : ${FTP_TIMEOUT=60}
+# HTTP communication.
+: ${HTTP_TIMEOUT=60}
 
 # Logic from src/usr.sbin/pkg_install/add/main.c, plus the possibility to
 # override the architecture with ARCH.
@@ -145,7 +147,7 @@ PACKAGESITE_MIRRORS="$(echo "$PACKAGESITE_MIRRORS" | /usr/bin/sort -u)"
 portsdir=$(/usr/bin/make -V PORTSDIR -f /usr/share/mk/bsd.port.mk 2> /dev/null)
 portsdir="${portsdir:-$ports}"
 
-export ARCH BRANCH PKG_INDEX PKG_MOVED PKG_UPDATING FTP_TIMEOUT
+export ARCH BRANCH PKG_INDEX PKG_MOVED PKG_UPDATING FTP_TIMEOUT HTTP_TIMEOUT
 export FTP_PASSIVE_MODE PACKAGEROOT PACKAGESITE
 export PACKAGEROOT_MIRRORS PACKAGESITE_MIRRORS
 
@@ -450,6 +452,7 @@ if [ -n "$cmd_env" ]; then
 	echo "BRANCH='$BRANCH'"
 	echo "FTP_PASSIVE_MODE='$FTP_PASSIVE_MODE'"
 	echo "FTP_TIMEOUT='$FTP_TIMEOUT'"
+	echo "HTTP_TIMEOUT='$HTTP_TIMEOUT'"
 	echo "PACKAGEROOT='$PACKAGEROOT'"
 	echo "PACKAGESITE='$PACKAGESITE'"
 	echo "PKG_INDEX='$PKG_INDEX'"

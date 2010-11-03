@@ -20,7 +20,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# version 0.9
+# version 0.99
 
 # Include once.
 test -n "$bsda_messaging" && return 0
@@ -40,11 +40,17 @@ bsda_messaging=1
 #	bsda:messaging:Lock		Read/Write file system locking class
 #	bsda:messaging:FileSystemListener
 #					Listener operating on a regular file
+#	bsda:messaging:FileSystemSender	Sender operating on a regular file
 #	bsda:messaging:FileSystemMessenger
 #					Messenger operating on a regular file
+#	bsda:messaging:PairMessenger	Messenger for 1-1 process communication
 #
 
-
+#
+# known bugs:
+#	When creating a FileSystemMessenger or PairMessenger fails, stale
+#	files might remain.
+#
 
 
 
@@ -190,7 +196,7 @@ bsda:messaging:Lock.lockWrite() {
 		/usr/bin/lockf -k "$lock" $bsda_obj_interpreter -c "
 			lock=\"\$(/bin/cat '$lock')\"
 			if [ \${lock:-0} -ge 0 ]; then
-				echo \$((\${lock:-0} + 1)) > '$lock'
+				echo \$((lock + 1)) > '$lock'
 				exit 0
 			fi
 			exit 1
@@ -482,5 +488,175 @@ bsda:messaging:FileSystemMessenger.send() {
 		return 1
 	fi
 	
+}
+
+#
+# A pair messenger allows 1-1 communication.
+#
+# It is much faster than the FileSystemMessenger, which has the benefit of
+# allowing n-n communication.
+#
+# The PairMessenger instance should be created prior to a fork and only used
+# by the main process and a single forked process. It cannot be used for
+# communication between several forked processes.
+#
+# Using this messenger requires appropriate use of the bsda:obj:fork()
+# function.
+#
+bsda:obj:createClass bsda:messaging:PairMessenger \
+	implements:bsda:messaging:Messenger \
+	r:private:pid \
+		"The PID of the original process" \
+	r:private:fifo \
+		"The message FIFO file name." \
+	w:private:buffer \
+		"The message read buffer." \
+	w:private:bufferLines \
+		"The message read buffer length in lines." \
+	i:private:init \
+		"The constructor." \
+	c:private:clean \
+		"The destructor." \
+
+#
+# The constructor checks whether the message FIFO is available.
+#
+# It creates two files acting as non-blocking FIFOs for each process.
+#
+# @param 1
+#	The file name prefix for the message FIFO.
+# @return
+#	0 if everything goes fine
+#	1 if creating a locking object fails
+#
+bsda:messaging:PairMessenger.init() {
+	/usr/bin/lockf -ks "$1.master.fifo" /bin/chmod 0600 "$1.master.fifo" || return 1
+	/usr/bin/lockf -ks "$1.fork.fifo" /bin/chmod 0600 "$1.fork.fifo" || return 1
+	setvar ${this}fifo "$1"
+	setvar ${this}pid "$bsda_obj_pid"
+}
+
+#
+# The destructor deletes the FIFOs if requested.
+#
+# @param 1
+#	If set the FIFOs are deleted.
+#
+bsda:messaging:PairMessenger.clean() {
+	local fifo
+	$this.getFifo fifo
+
+	test -n "$1" && /bin/rm "$fifo.master.fifo" "$fifo.fork.fifo"
+	return 0
+}
+
+#
+# Sends a message.
+#
+# @param 1
+#	The message to send.
+#
+bsda:messaging:PairMessenger.send() {
+	local IFS fifo pid
+	# Make sure $bsda_obj_interpreter is split into several fields.
+	IFS=' 	
+'
+
+	$this.getFifo fifo
+	$this.getPid pid
+
+	# Check whether this is the master process or the fork.
+	if [ $pid = $bsda_obj_pid ]; then
+		# This is the master, send to the fork.
+		fifo="$fifo.fork.fifo"
+	else
+		# This is the fork, send to the master.
+		fifo="$fifo.master.fifo"
+	fi
+
+	echo "$1" | /usr/bin/lockf -ks "$fifo" $bsda_obj_interpreter -c "/bin/cat >> '$fifo'"
+}
+
+#
+# Returns all unread lines from the message FIFO.
+#
+# @param 1
+#	The name of the variable to store the received lines in.
+# @param 2
+#	The variable to store number of lines received in.
+#
+bsda:messaging:PairMessenger.receive() {
+	local IFS fifo pid output count buffer
+
+	$this.getFifo fifo
+	$this.getPid pid
+
+	# Check whether this is the master process or the fork.
+	if [ $pid = $bsda_obj_pid ]; then
+		# This is the master, read from the master FIFO.
+		fifo="$fifo.master.fifo"
+	else
+		# This is the fork, read from the fork FIFO.
+		fifo="$fifo.fork.fifo"
+	fi
+
+	# Make sure $bsda_obj_interpreter is split into several fields.
+	IFS=' 	
+'
+ 
+	# Read and flush the FIFO
+	output="$(/usr/bin/lockf -ks "$fifo" $bsda_obj_interpreter -c "
+			/usr/bin/awk '1 END {print NR}' '$fifo'
+			echo -n > '$fifo'
+		"
+	)"
+
+	# Set IFS to line break.
+	IFS='
+'
+	# Return the results.
+	$this.getBuffer buffer
+	$this.getBufferLines count
+	count=$((count + ${output##*$IFS}))
+	output="${output%$count}"
+	output="${output%$IFS}"
+	$caller.setvar "$1" "$buffer${buffer:+${output:+$IFS}}$output"
+	$caller.setvar "$2" $(($() count))
+	unset ${this}buffer ${this}bufferLines
+}
+
+#
+# Returns the first line from the message FIFO.
+#
+# @param 1
+#	The name of the variable to store the received line in.
+# @param 2
+#	The variable to store number of lines received in.
+#
+bsda:messaging:PairMessenger.receiveLine() {
+	local IFS count buffer output
+
+	IFS='
+'
+
+	# Update the read buffer if neccessary.
+	$this.getBufferLines count
+	if [ $((count)) -eq 0 ]; then
+		$this.receive ${this}buffer ${this}bufferLines
+	fi
+
+	# Get the output line from the buffer.
+	$this.getBuffer buffer
+	$this.getBufferLines count
+	output="${buffer%%$IFS*}"
+
+	# Return the output line.
+	$caller.setvar "$1" "$output"
+	$caller.setvar "$2" $((count >= 1))
+
+	# Update the buffer.
+	buffer="${buffer#$output}"
+	$this.setBuffer "${buffer#$IFS}"
+	$this.setBufferLines $((count - (count >= 1)))
 }
 
