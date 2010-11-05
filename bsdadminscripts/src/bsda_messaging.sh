@@ -36,20 +36,52 @@ bsda_messaging=1
 #
 # The following is a list of all classes and interfaces:
 #	bsda:messaging:Listener		Listener interface
+#	bsda:messaging:Sender		Sender interface
 #	bsda:messaging:Messenger	Messenger interface
 #	bsda:messaging:Lock		Read/Write file system locking class
-#	bsda:messaging:FileSystemListener
-#					Listener operating on a regular file
-#	bsda:messaging:FileSystemSender	Sender operating on a regular file
-#	bsda:messaging:FileSystemMessenger
-#					Messenger operating on a regular file
-#	bsda:messaging:PairMessenger	Messenger for 1-1 process communication
+#	bsda:messaging:BusListener	Listener operating on a regular file
+#	bsda:messaging:BusSender	Sender operating on a regular file
+#	bsda:messaging:BusMessenger	Messenger operating on a regular file
+#	bsda:messaging:PtpMessenger	Messenger for 1-1 process communication
+#	bsda:messaging:FifoListener	Listener for a FIFO
+#	bsda:messaging:FifoSender	Sender for a FIFO
 #
 
 #
-# known bugs:
-#	When creating a FileSystemMessenger or PairMessenger fails, stale
-#	files might remain.
+# TABLES
+#
+# The following tables should help decide, which messenger type to use.
+#
+# Legend
+#	Type	Communication Type
+#	Block.	Read access blocks the process until a message is received
+#	Buff.	Buffering
+#	WL	Writing Locks
+#	RL	Reading Locks
+#
+# Types
+#	bus	Every participant can send and receive, every message is
+#		available to every participant.
+#	ptp	Point To Point communication, there are only two communication
+#		partners, messages are only received by the partner
+#	queue	Messages are kept in a queue, the first listener to read
+#		gets the message. Queues may not be read buffered.
+#		
+#
+# Listeners
+#	Name			Type	Block.	Buff.	WL	RL
+#	BusListener		bus	no	--	--	-w
+#	FifoListener		ptp	no	r-	--	rw
+#
+# Senders
+#	Name			Type	Block.	Buff.	WL	RL
+#	BusSender		bus	-	--	rw	--
+#	FifoSender		ptp	-	--	rw	--
+#
+# Messengers
+#	Name			Type	Block.	Buff.	WL	RL
+#	BusMessenger		bus	no	--	rw	-w
+#	PtpMessenger		ptp	no	r-	r-	r-
 #
 
 
@@ -58,22 +90,45 @@ bsda_messaging=1
 # An interface for listeners.
 #
 bsda:obj:createInterface bsda:messaging:Listener \
+	"
+	# Receives data from a source.
+	#
+	# @param 1
+	#	The received data.
+	# @param 2
+	#	The number of data lines received.
+	#"\
 	x:receive \
-		"Receives data from a sourcex" \
+	"
+	# Receives a single line of data.
+	#
+	# @param 1
+	#	The received line.
+	# @param 2
+	#	The number or lines received (0 or 1).
+	#"\
 	x:receiveLine \
-		"Receives a single line of data." \
 
 #
 # An interface for senders.
 #
 bsda:obj:createInterface bsda:messaging:Sender \
+	"
+	# Sends data.
+	#
+	# @param 1
+	#	The data to transmit.
+	# @return 0
+	#	Transmitting the data succeeded
+	# @return 1
+	#	Transmitting the data failed, the only permitted reason to
+	#	fail sending is if it is required to read all present messages
+	#	first.
+	#"\
 	x:send \
-		"Sends data." \
 
 #
-# An interface for messengers. Note that unlike a raw sender a messanger
-# needs to make sure that all data has been received, before a message is
-# sent.
+# An interface for messengers that allow bi-directional communication.
 #
 bsda:obj:createInterface bsda:messaging:Messenger \
 	extends:bsda:messaging:Listener \
@@ -82,7 +137,7 @@ bsda:obj:createInterface bsda:messaging:Messenger \
 #
 # Instances of this class offer read and write locks to a file.
 #
-bsda:obj:createClass bsda:messaging:Lock \
+bsda:obj:createClass bsda:messaging:Lock  \
 	w:private:lock \
 		"The file to use for locking." \
 	i:private:init \
@@ -228,7 +283,7 @@ bsda:messaging:Lock.unlockWrite() {
 #
 # A listener on a file system message queue for read only access.
 #
-bsda:obj:createClass bsda:messaging:FileSystemListener \
+bsda:obj:createClass bsda:messaging:BusListener \
 	implements:bsda:messaging:Listener \
 	r:private:lock \
 		"A Lock instance." \
@@ -250,9 +305,12 @@ bsda:obj:createClass bsda:messaging:FileSystemListener \
 #	0 if everything goes fine
 #	1 if creating a locking object fails
 #
-bsda:messaging:FileSystemListener.init() {
+bsda:messaging:BusListener.init() {
 	/usr/bin/lockf -ks "$1" /bin/chmod 0600 "$1" || return 1
-	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
+	if ! bsda:messaging:Lock ${this}lock "$1.lock"; then
+		/bin/rm "$1"
+		return 1
+	fi
 	setvar ${this}queue "$1"
 	setvar ${this}position 0
 }
@@ -263,7 +321,7 @@ bsda:messaging:FileSystemListener.init() {
 # @param 1
 #	If set the queue is deleted.
 #
-bsda:messaging:FileSystemListener.clean() {
+bsda:messaging:BusListener.clean() {
 	local lock queue
 	$this.getLock lock
 	$this.getQueue queue
@@ -281,7 +339,7 @@ bsda:messaging:FileSystemListener.clean() {
 # @param 2
 #	The variable to store number of lines received in.
 #
-bsda:messaging:FileSystemListener.receive() {
+bsda:messaging:BusListener.receive() {
 	local IFS position queue result lines lock
 	IFS='
 '
@@ -328,7 +386,7 @@ bsda:messaging:FileSystemListener.receive() {
 # @param 2
 #	The variable to store number of lines received in.
 #
-bsda:messaging:FileSystemListener.receiveLine() {
+bsda:messaging:BusListener.receiveLine() {
 	local IFS position queue result lines lock
 	IFS='
 '
@@ -372,7 +430,7 @@ bsda:messaging:FileSystemListener.receiveLine() {
 #
 # A raw sender class, .
 #
-bsda:obj:createClass bsda:messaging:FileSystemSender \
+bsda:obj:createClass bsda:messaging:BusSender \
 	implements:bsda:messaging:Sender \
 	r:private:lock \
 		"A Lock instance." \
@@ -392,17 +450,20 @@ bsda:obj:createClass bsda:messaging:FileSystemSender \
 #	0 if everything goes fine
 #	1 if creating a locking object fails
 #
-bsda:messaging:FileSystemSender.init() {
+bsda:messaging:BusSender.init() {
 	/usr/bin/lockf -ks "$1" /bin/chmod 0600 "$1" || return 1
-	bsda:messaging:Lock ${this}lock "$1.lock" || return 1
+	if ! bsda:messaging:Lock ${this}lock "$1.lock"; then
+		/bin/rm "$1"
+		return 1
+	fi
 	setvar ${this}queue "$1"
 }
 
 #
 # Borrow the destructor from the listener.
 #
-bsda:messaging:FileSystemSender.clean() {
-	bsda:messaging:FileSystemListener.clean "$@"
+bsda:messaging:BusSender.clean() {
+	bsda:messaging:BusListener.clean "$@"
 }
 
 #
@@ -411,7 +472,7 @@ bsda:messaging:FileSystemSender.clean() {
 # @param 1
 #	The message to send.
 #
-bsda:messaging:FileSystemSender.send() {
+bsda:messaging:BusSender.send() {
 	local queue result lock
 
 	$this.getLock lock
@@ -438,9 +499,9 @@ bsda:messaging:FileSystemSender.send() {
 # all queued up message lines and send() will only work if there is no
 # unread data left in the queue.
 #
-bsda:obj:createClass bsda:messaging:FileSystemMessenger \
+bsda:obj:createClass bsda:messaging:BusMessenger \
 	implements:bsda:messaging:Messenger \
-	extends:bsda:messaging:FileSystemListener \
+	extends:bsda:messaging:BusListener \
 
 
 #
@@ -457,7 +518,7 @@ bsda:obj:createClass bsda:messaging:FileSystemMessenger \
 #	0 if the message was sent
 #	1 if the queue contains unreceived messages.
 #
-bsda:messaging:FileSystemMessenger.send() {
+bsda:messaging:BusMessenger.send() {
 	local position queue result lock
 
 	$this.getLock lock
@@ -493,17 +554,17 @@ bsda:messaging:FileSystemMessenger.send() {
 #
 # A pair messenger allows 1-1 communication between a parent and child process.
 #
-# It is much faster than the FileSystemMessenger, which has the benefit of
+# It is much faster than the BusMessenger, which has the benefit of
 # allowing n-n communication.
 #
-# The PairMessenger instance should be created prior to a fork and only used
+# The PtpMessenger instance should be created prior to a fork and only used
 # by the main process and a single forked process. It cannot be used for
 # communication between several forked processes.
 #
 # Using this messenger requires appropriate use of the bsda:obj:fork()
 # function.
 #
-bsda:obj:createClass bsda:messaging:PairMessenger \
+bsda:obj:createClass bsda:messaging:PtpMessenger \
 	implements:bsda:messaging:Messenger \
 	r:private:pid \
 		"The PID of the original process" \
@@ -529,9 +590,12 @@ bsda:obj:createClass bsda:messaging:PairMessenger \
 #	0 if everything goes fine
 #	1 if creating a locking object fails
 #
-bsda:messaging:PairMessenger.init() {
+bsda:messaging:PtpMessenger.init() {
 	/usr/bin/lockf -ks "$1.master.fifo" /bin/chmod 0600 "$1.master.fifo" || return 1
-	/usr/bin/lockf -ks "$1.fork.fifo" /bin/chmod 0600 "$1.fork.fifo" || return 1
+	if ! /usr/bin/lockf -ks "$1.fork.fifo" /bin/chmod 0600 "$1.fork.fifo"; then
+		/bin/rm "$1.master.fifo"
+		return 1
+	fi
 	setvar ${this}fifo "$1"
 	setvar ${this}pid "$bsda_obj_pid"
 }
@@ -542,7 +606,7 @@ bsda:messaging:PairMessenger.init() {
 # @param 1
 #	If set the FIFOs are deleted.
 #
-bsda:messaging:PairMessenger.clean() {
+bsda:messaging:PtpMessenger.clean() {
 	local fifo
 	$this.getFifo fifo
 
@@ -556,7 +620,7 @@ bsda:messaging:PairMessenger.clean() {
 # @param 1
 #	The message to send.
 #
-bsda:messaging:PairMessenger.send() {
+bsda:messaging:PtpMessenger.send() {
 	local IFS fifo pid
 	# Make sure $bsda_obj_interpreter is split into several fields.
 	IFS=' 	
@@ -585,7 +649,7 @@ bsda:messaging:PairMessenger.send() {
 # @param 2
 #	The variable to store number of lines received in.
 #
-bsda:messaging:PairMessenger.receive() {
+bsda:messaging:PtpMessenger.receive() {
 	local IFS fifo pid output count buffer bufferLines
 
 	$this.getFifo fifo
@@ -633,13 +697,13 @@ bsda:messaging:PairMessenger.receive() {
 # @param 2
 #	The variable to store number of lines received in.
 #
-bsda:messaging:PairMessenger.receiveLine() {
+bsda:messaging:PtpMessenger.receiveLine() {
 	local IFS count buffer output
 
 	IFS='
 '
 
-	# Update the read buffer if neccessary.
+	# Update the read buffer if necessary.
 	$this.getBufferLines count
 	if [ $((count)) -eq 0 ]; then
 		$this.receive ${this}buffer ${this}bufferLines
@@ -760,7 +824,7 @@ bsda:messaging:FifoListener.receiveLine() {
 	IFS='
 '
 
-	# Update the read buffer if neccessary.
+	# Update the read buffer if necessary.
 	$this.getBufferLines count
 	if [ $((count)) -eq 0 ]; then
 		$this.receive ${this}buffer ${this}bufferLines

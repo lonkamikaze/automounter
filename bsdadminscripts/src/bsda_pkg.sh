@@ -208,7 +208,7 @@ bsda:pkg:Index.init() {
 		return 1
 	fi
 	setvar ${this}index "$1"
-	origin="$(head -n1 "$1"| cut -d\| -f$bsda_pkg_IDX_ORIGIN)"
+	origin="$(/usr/bin/head -n1 "$1"| /usr/bin/cut -d\| -f$bsda_pkg_IDX_ORIGIN)"
 	setvar ${this}originPrefix "${origin%/*/*}/"
 
 	# Check the MOVED file.
@@ -274,7 +274,7 @@ bsda:pkg:Index.search() {
 			# Initialize result counter.
 			count = 0
 			# Create an array with the search strings as indices.
-			$(echo "$3" | sed -e 's/^/search["/1' -e 's/$/"]/1')
+			$(echo "$3" | /usr/bin/sed -e 's/^/search["/1' -e 's/$/"]/1')
 		}
 
 		# Check whether the current line matches an array element.
@@ -568,7 +568,7 @@ bsda:pkg:Index.identifyOrigins() {
 	matching=
 
 	# Redirect requests that are not glob patterns.
-	if ! echo "$2" | egrep -q '\*|\?|\[.*]'; then
+	if ! echo "$2" | /usr/bin/egrep -q '\*|\?|\[.*]'; then
 		$this.getPackagesByOrigins matching "$2"
 		# Check whether there was a match.
 		if [ -z "$matching" ]; then
@@ -583,7 +583,7 @@ bsda:pkg:Index.identifyOrigins() {
 
 	# The pattern really is a glob pattern. Get installed packages matching
 	# this.
-	$this.getPackagesByOrigins matching "$(pkg_info -qo $(pkg_info -qO "$2"))"
+	$this.getPackagesByOrigins matching "$(/usr/sbin/pkg_info -qo $(/usr/sbin/pkg_info -qO "$2"))"
 	# Check whether there was a match.
 	if [ -z "$matching" ]; then
 		# The origin glob pattern did not yield any indexed matches.
@@ -620,8 +620,8 @@ bsda:pkg:Index.identifyNames() {
 '
 
 	# Deal with glob patterns.
-	if echo "$2" | egrep -q '\*|\?|\[.*]'; then
-		$this.getPackagesByOrigins matching "$(pkg_info -qo "$2" 2> /dev/null)"
+	if echo "$2" | /usr/bin/egrep -q '\*|\?|\[.*]'; then
+		$this.getPackagesByOrigins matching "$(/usr/sbin/pkg_info -qo "$2" 2> /dev/null)"
 		# Check for matches.
 		if [ -z "$matching" ]; then
 			# Either there are no installed packages matching or
@@ -642,7 +642,7 @@ bsda:pkg:Index.identifyNames() {
 	# of guesswork.
 
 	# First try whether the name matches an installed package.
-	$this.getPackagesByOrigins matching "$(pkg_info -qo "$2" 2> /dev/null)"
+	$this.getPackagesByOrigins matching "$(/usr/sbin/pkg_info -qo "$2" 2> /dev/null)"
 
 	# If no match has been found and indexed try to get a match
 	# from the INDEX.
@@ -669,30 +669,27 @@ bsda:pkg:Index.identifyNames() {
 	# Create a grep pattern. Here are some examples:
 	#	ru-apache13 -> ru-apache-[^-]*
 	#	firefox35 -> firefox-[^-]*
-	pattern="$(echo "$2" | sed 's/[0-9]*$/-[^-]*/1')"
-	# Get the line numbers of package names matching this pattern.
-	numbers="$(cut -d\| -f$bsda_pkg_IDX_PKG "$index" | grep -nx "$pattern" | sed 's/:.*/p/1' | rs -C\;)"
-	# Get the lines from the index.
-	lines="$(sed -n "${numbers%;}" "$index")"
+	pattern="$(echo "$2" | /usr/bin/sed 's/[0-9]*$/-[^-]*/1')"
+	# Get the lines with package names matching this pattern.
+	lines="$(/usr/bin/awk -F\| "\$$bsda_pkg_IDX_PKG ~ /^$pattern\$/" "$index")"
 
 	# Check whether more than one package have been matched (e.g. that'd be
 	# the case for firefox35).
-	if [ $(echo "$lines" | wc -l) -gt 1 ]; then
+	if [ $(echo "$lines" | /usr/bin/wc -l) -gt 1 ]; then
 		# Too many package names have been matched, so we match the
 		# package name against the origins of the found packages.
-		numbers="$(echo "$lines" | cut -d\| -f$bsda_pkg_IDX_ORIGIN | sed 's|.*/||1' | grep -nFx "$2" | sed 's/:.*/p/1' | rs -C\;)"
-		lines="$(echo "$lines" | sed -n "${numbers%;}")"
+		lines="$(echo "$lines" | /usr/bin/awk -F\| "\$$bsda_pkg_IDX_ORIGIN ~ \"^.*/$2\$\"")"
 
 		# Check whether there is still more than one match.
-		if [ $(echo "$lines" | wc -l) -gt 1 ]; then
+		if [ $(echo "$lines" | /usr/bin/wc -l) -gt 1 ]; then
 			# If there is more than one origin around we prefer
 			# the one that is alread installed.
-			numbers="$(echo "$lines" | cut -d\| -f$bsda_pkg_IDX_ORIGIN | sed "s|$prefix||1" | grep -nFx "$(pkg_info -qoa)" | sed 's/:.*/p/1' | rs -C\;)"
-			lines="$(echo "$lines" | sed -n "${numbers%;}")"
+			numbers="$(echo "$lines" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_ORIGIN | /usr/bin/sed "s|$prefix||1" | /usr/bin/grep -nFx "$(/usr/sbin/pkg_info -qoa)" | /usr/bin/sed 's/:.*/p/1' | /usr/bin/rs -C\;)"
+			lines="$(echo "$lines" | /usr/bin/sed -n "${numbers%;}")"
 		fi
 
 		# Bail out if there is still more than one match.
-		if [ $(echo "$lines" | wc -l) -gt 1 ]; then
+		if [ $(echo "$lines" | /usr/bin/wc -l) -gt 1 ]; then
 			bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_NAME_AMBIGUOUS
 			return 1
 		fi
@@ -707,7 +704,7 @@ bsda:pkg:Index.identifyNames() {
 
 	# Arriving here means that the LATEST_LINK guessing has actually
 	# provided us with a single package.
-	origin="$(echo "$lines" | cut -d\| -f$bsda_pkg_IDX_ORIGIN)"
+	origin="$(echo "$lines" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_ORIGIN)"
 	# Because we have our information from the index we can skip the
 	# sanity checks here.
 	$this.getPackagesByOrigins matching "${origin#$prefix}"
@@ -747,7 +744,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	# Collect the encountered origins.
 	origins=
 	# Apply the blacklist to the requested origins.
-	missing="$(echo "$2" | grep -vFx "$blacklist")"
+	missing="$(echo "$2" | /usr/bin/grep -vFx "$blacklist")"
 
 	$this.getKnownPackages packages missing "$missing"
 
@@ -768,7 +765,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	# Create packages.
 	for line in $lines; do
 		# Create a new Package instance.
-		name="$(echo "$line" | cut -d\| -f$bsda_pkg_IDX_PKG,$bsda_pkg_IDX_ORIGIN)"
+		name="$(echo "$line" | /usr/bin/cut -d\| -f$bsda_pkg_IDX_PKG,$bsda_pkg_IDX_ORIGIN)"
 		origin="${name##*|$prefix}"
 		name="${name%|*}"
 		bsda:pkg:Package pkg $this "$origin" "$name" "$line"
@@ -785,7 +782,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	$this.addPackages "$newPackages"
 
 	# Remove available origins from the list of missing origins.
-	missing="$(echo "$missing" | grep -vFx "$origins")"
+	missing="$(echo "$missing" | /usr/bin/grep -vFx "$origins")"
 
 	# If all requested origins have been found, return.
 	if [ -z "$missing" -o -n "$3" ]; then
@@ -812,7 +809,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	# the original origin would be lost. This would break
 	# blacklisting.
 	for line in $lines; do
-		oldorigin="$(echo "$line" | cut -d\| -f$bsda_pkg_MOV_OLDORIGIN,$bsda_pkg_MOV_NEWORIGIN)"
+		oldorigin="$(echo "$line" | /usr/bin/cut -d\| -f$bsda_pkg_MOV_OLDORIGIN,$bsda_pkg_MOV_NEWORIGIN)"
 		neworigin="${oldorigin##*|}"
 		oldorigin="${oldorigin%|*}"
 
@@ -848,7 +845,7 @@ bsda:pkg:Index.getPackagesByOrigins() {
 	
 
 	# Remove available origins from the list of missing origins.
-	missing="$(echo "$missing" | grep -vFx "$origins")"
+	missing="$(echo "$missing" | /usr/bin/grep -vFx "$origins")"
 
 	# Store the blacklist.
 	setvar ${this}originBlacklist "$blacklist${blacklist:+${missing:+$IFS}}$missing"
