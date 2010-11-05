@@ -622,10 +622,9 @@ bsda_obj=1
 # After the last line the $configuration object can be used exactly like
 # in the previous session.
 #
-# Serialized data is executable shell code, so it can also be deserialized
-# by using the eval command:
-#
-#	eval "$(cat ~/.myconfig)"
+# Serialized data is executable shell code that can be fed to eval, however
+# the bsda:obj:deserialize() function should always be used to ensure that
+# deserialization happens in a controlled environment.
 #
 # @param 1
 #	The name of the variable to store the object ID (reference) of the
@@ -1451,9 +1450,9 @@ bsda:obj:createClass() {
 
 			serialized=
 			for attribute in \$(echo '$attributes'); do
-				serialized=\"\${serialized:+\$serialized;}\${this}\$attribute='\$(
-					eval \"printf '%s' \\\"\\\${\${this}\$attribute}\\\"\" | /usr/bin/b64encode - | /usr/bin/awk 'NR > 1 {printf line; line = \$0}'
-				)'\"
+				serialized=\"\${serialized:+\$serialized;}\${this}\$attribute=\\\"\$(
+					eval \"echo -n \\\"\\\${\${this}\$attribute}\\\"\" | /usr/bin/awk 'BEGIN {ORS = \"\${IFS}\"} nl++ {print \"\"} {gsub(/\\\\/, \"\\\\\\\\\");gsub(/\\\$/, \"\\\\\$\");gsub(/\"/, \"\\\\\\\"\");printf}'
+				)\\\"\"
 			done
 			serialized=\"\$serialized;$class.deserialize \$this\"
 
@@ -1472,7 +1471,7 @@ bsda:obj:createClass() {
 '
 
 			# Check whether this has already been serialized.
-			if echo \"\$this\" | grep -qFx \"\$bsda_obj_serializeBlacklist\"; then
+			if echo \"\$this\" | /usr/bin/grep -qFx \"\$bsda_obj_serializeBlacklist\"; then
 				# Already serialized, return.
 				return 0
 			fi
@@ -1539,20 +1538,8 @@ bsda:obj:createClass() {
 	# A static deserialize method.
 	eval "
 		$class.deserialize() {
-			local IFS attribute
-
-			IFS='
-'
-
 			# Create method instances.
 			$bsda_obj_namespace:createMethods $class $classPrefix \$1 \"$methods\"
-
-			# Deserialize attributes.
-			for attribute in \$(echo '$attributes'); do
-				setvar \"\$1\$attribute\" \"\$(
-					eval \"echo \\\"\\\${\$1\$attribute}\\\"\" | /usr/bin/b64decode -pr
-				)\"
-			done
 		}
 	"
 
@@ -1867,11 +1854,17 @@ bsda:obj:deserialize() {
 	fi
 
 	if [ -n "$2" ]; then
-		eval "$2"
 		setvar "$1" "${2##* }"
+		local IFS
+		IFS='
+'
+		eval "$2"
 	else
-		eval "$1"
 		echo "${1##* }"
+		local IFS
+		IFS='
+'
+		eval "$1"
 	fi
 }
 
