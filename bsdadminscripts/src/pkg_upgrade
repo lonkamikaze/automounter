@@ -412,7 +412,7 @@ pu:Verify.init() {
 	$caller.getObject session
 	$this.setSession $session
 	$this.setPackages "$1"
-	$session.status "Waiting for downloads ..."
+	$session.status "Verifying packages ..."
 	$session.verbose "Verifying packages."
 	bsda:scheduler:Sleep ${this}sleeper 1
 }
@@ -450,7 +450,7 @@ pu:Verify.panic() {
 }
 
 pu:Verify.run() {
-	local IFS session sleeper
+	local IFS session sleeper statPid
 	IFS='
 '
 
@@ -469,9 +469,12 @@ pu:Verify.run() {
 	$this.getPackages packages
 	# Get the completed downloads.
 	$session.getIndex index
+	# If reading the completed downloads takes too long, change the
+	# status display.
+	(trap 'exit 0' sigterm; /bin/sleep 2; /bin/kill -0 $bsda_obj_pid 2> /dev/null || exit 0; trap '' sigterm; $session.status "Verifying packages ...") &
+	statPid=$!
 	if $index.completedDownloads downloads; then
-		$session.status "Verifying packages ..."
-
+		/bin/kill $statPid 2> /dev/null
 		local file pkg failed
 		# Verify each package that was returned.
 		for pkg in $downloads; do
@@ -497,6 +500,8 @@ pu:Verify.run() {
 		# Remove the completed packages from the todo list.
 		packages="$(echo "$packages" | /usr/bin/grep -vxF "$downloads")"
 		$this.setPackages "$packages"
+	else
+		/bin/kill $statPid 2> /dev/null
 	fi
 
 	# No packages left to verify?
@@ -514,7 +519,11 @@ pu:Verify.run() {
 	# Display donwload stats, but only if there is a downloader and no
 	# downloads have been verified.
 	$session.getDownloader downloader
-	if [ -n "$downloader" -a -z "$downloads" ]; then
+	if [ -n "$downloads" ]; then
+		# Don't sleep if there have been downloads.
+		# This way the display will be updated faster.
+		$sleeper.stop
+	elif [ -n "$downloader" ]; then
 		local null jobs statusJobs speed full terminal file size
 		local progress line
 		# Get the terminal for the formatting functions.
@@ -542,6 +551,8 @@ pu:Verify.run() {
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
 			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
 			$session.status "$line"
+		else
+			$session.status "Waiting for downloads ..."
 		fi
 	fi
 }
@@ -1044,7 +1055,7 @@ pu:Session.updateAll() {
 	pkgs="$(echo "$pkgs" | /usr/bin/grep -vxF "$packages")"
 	$this.setPackages "$(echo "$packages${packages:+${pkgs:+$IFS}}$pkgs")"
 
-	$this.status "Dispatching $(($(echo "$pkgs" | /usr/bin/wc -w))) package downloads."
+	$this.status "Dispatching $(($(echo "$pkgs" | /usr/bin/wc -w))) package downloads ..."
 	
 	# Start downloads for new packages.
 	$index.fetch "$pkgs"

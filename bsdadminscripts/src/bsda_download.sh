@@ -544,8 +544,8 @@ bsda:download:Server.init() {
 	bsda:obj:isInt "${2:-1}" && [ "${2:-1}" -gt "0" ] || return 1
 	$this.setFree "${2:-1}"
 	$this.setDownloads
-	bsda:messaging:FileSystemListener ${this}listener "$bsda_download_tmp/$this" || return 2
-	bsda:messaging:FileSystemSender ${this}sender "$bsda_download_tmp/$this" || return 2
+	bsda:messaging:FifoListener ${this}listener "$bsda_download_tmp/$this" || return 2
+	bsda:messaging:FifoSender ${this}sender "$bsda_download_tmp/$this" || return 2
 }
 
 #
