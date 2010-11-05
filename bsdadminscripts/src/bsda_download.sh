@@ -120,7 +120,7 @@ bsda:download:Manager.init() {
 	fi
 
 	# Create a message queue.
-	bsda:messaging:PairMessenger ${this}messenger "$bsda_download_tmp/$this"
+	bsda:messaging:PtpMessenger ${this}messenger "$bsda_download_tmp/$this"
 
 	# Fork away the background downloader.
 	$this.downloader &
