@@ -491,7 +491,7 @@ bsda:messaging:FileSystemMessenger.send() {
 }
 
 #
-# A pair messenger allows 1-1 communication.
+# A pair messenger allows 1-1 communication between a parent and child process.
 #
 # It is much faster than the FileSystemMessenger, which has the benefit of
 # allowing n-n communication.
@@ -586,7 +586,7 @@ bsda:messaging:PairMessenger.send() {
 #	The variable to store number of lines received in.
 #
 bsda:messaging:PairMessenger.receive() {
-	local IFS fifo pid output count buffer
+	local IFS fifo pid output count buffer bufferLines
 
 	$this.getFifo fifo
 	$this.getPid pid
@@ -616,12 +616,12 @@ bsda:messaging:PairMessenger.receive() {
 '
 	# Return the results.
 	$this.getBuffer buffer
-	$this.getBufferLines count
-	count=$((count + ${output##*$IFS}))
+	$this.getBufferLines bufferLines
+	count="${output##*$IFS}"
 	output="${output%$count}"
 	output="${output%$IFS}"
 	$caller.setvar "$1" "$buffer${buffer:+${output:+$IFS}}$output"
-	$caller.setvar "$2" $(($() count))
+	$caller.setvar "$2" $((bufferLines + count))
 	unset ${this}buffer ${this}bufferLines
 }
 
@@ -657,6 +657,181 @@ bsda:messaging:PairMessenger.receiveLine() {
 	# Update the buffer.
 	buffer="${buffer#$output}"
 	$this.setBuffer "${buffer#$IFS}"
-	$this.setBufferLines $((count - (count >= 1)))
+	$this.setBufferLines $((count - (count >= 1) ))
+}
+
+#
+# Instances of this class allow reading data from a FIFO.
+#
+# Only a single process should read from a FIFO.
+#
+bsda:obj:createClass bsda:messaging:FifoListener \
+	implements:bsda:messaging:Listener \
+	r:private:fifo \
+		"The fifo file." \
+	w:private:buffer \
+		"The message read buffer." \
+	w:private:bufferLines \
+		"The message read buffer length in lines." \
+	i:private:init \
+		"The constructor creates the FIFO." \
+	c:private:clean \
+		"The destructor." \
+
+#
+# The constructor checks whether the FIFO can be locked.
+#
+# @param 1
+#	The file name of the FIFO.
+# @return 0
+#	Locking the FIFO succeeded.
+# @return 1
+#	Locking the FIFO did not succeed.
+#
+bsda:messaging:FifoListener.init() {
+	/usr/bin/lockf -ks "$1.fifo" /bin/chmod 0600 "$1.fifo" || return 1
+	setvar ${this}fifo "$1.fifo"
+}
+
+#
+# The destructor deletes the FIFO if requested.
+#
+# @param 1
+#	If set the FIFO is deleted.
+#
+bsda:messaging:FifoListener.clean() {
+	local fifo
+	$this.getFifo fifo
+
+	test -n "$1" && /bin/rm "$fifo"
+	return 0
+}
+
+#
+# Returns all unread lines from the FIFO.
+#
+# @param 1
+#	The name of the variable to store the received lines in.
+# @param 2
+#	The variable to store number of lines received in.
+#
+bsda:messaging:FifoListener.receive() {
+	local IFS fifo output count buffer bufferLines
+
+	$this.getFifo fifo
+
+	# Make sure $bsda_obj_interpreter is split into several fields.
+	IFS=' 	
+'
+ 
+	# Read and flush the FIFO
+	output="$(/usr/bin/lockf -ks "$fifo" $bsda_obj_interpreter -c "
+			/usr/bin/awk '1 END {print NR}' '$fifo'
+			echo -n > '$fifo'
+		"
+	)"
+
+	# Set IFS to line break.
+	IFS='
+'
+	# Return the results.
+	$this.getBuffer buffer
+	$this.getBufferLines count
+	$this.getBufferLines bufferLines
+	count="${output##*$IFS}"
+	output="${output%$count}"
+	output="${output%$IFS}"
+	$caller.setvar "$1" "$buffer${buffer:+${output:+$IFS}}$output"
+	$caller.setvar "$2" $((bufferLines + count))
+	unset ${this}buffer ${this}bufferLines
+}
+
+#
+# Returns the first line from the message FIFO.
+#
+# @param 1
+#	The name of the variable to store the received line in.
+# @param 2
+#	The variable to store number of lines received in.
+#
+bsda:messaging:FifoListener.receiveLine() {
+	local IFS count buffer output
+
+	IFS='
+'
+
+	# Update the read buffer if neccessary.
+	$this.getBufferLines count
+	if [ $((count)) -eq 0 ]; then
+		$this.receive ${this}buffer ${this}bufferLines
+	fi
+
+	# Get the output line from the buffer.
+	$this.getBuffer buffer
+	$this.getBufferLines count
+	output="${buffer%%$IFS*}"
+
+	# Return the output line.
+	$caller.setvar "$1" "$output"
+	$caller.setvar "$2" $((count >= 1))
+
+	# Update the buffer.
+	buffer="${buffer#$output}"
+	$this.setBuffer "${buffer#$IFS}"
+	$this.setBufferLines $((count - (count >= 1) ))
+}
+
+#
+# Instances of this class allow storing data in a FIFO.
+#
+# FIFOs are useful for n to 1 single direction communication (many senders, one
+# receiver).
+#
+bsda:obj:createClass bsda:messaging:FifoSender \
+	implements:bsda:messaging:Sender \
+	r:private:fifo \
+		"The fifo file." \
+	i:private:init \
+		"The constructor creates the FIFO." \
+	c:private:clean \
+		"The destructor." \
+
+#
+# The constructor checks whether the FIFO can be locked.
+#
+# @param 1
+#	The file name of the FIFO.
+# @return 0
+#	Locking the FIFO succeeded.
+# @return 1
+#	Locking the FIFO did not succeed.
+#
+bsda:messaging:FifoSender.init() {
+	bsda:messaging:FifoListener.init "$@"
+}
+
+#
+# The destructor deletes the FIFO if requested.
+#
+# @param 1
+#	If set the FIFO is deleted.
+#
+bsda:messaging:FifoSender.clean() {
+	bsda:messaging:FifoListener.clean "$@"
+}
+
+#
+# Sends a message.
+#
+# @param 1
+#	The message to send.
+#
+bsda:messaging:FifoSender.send() {
+	local IFS fifo
+	# Make sure $bsda_obj_interpreter is split into several fields.
+	IFS=' 	
+'
+	$this.getFifo fifo
+	echo "$1" | /usr/bin/lockf -ks "$fifo" $bsda_obj_interpreter -c "/bin/cat >> '$fifo'"
 }
 
