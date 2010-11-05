@@ -414,7 +414,7 @@ pu:Verify.init() {
 	$this.setPackages "$1"
 	$session.status "Verifying packages ..."
 	$session.verbose "Verifying packages."
-	bsda:scheduler:Sleep ${this}sleeper 1
+	bsda:scheduler:Sleep ${this}sleeper 2
 }
 
 pu:Verify.clean() {
@@ -471,6 +471,8 @@ pu:Verify.run() {
 	$session.getIndex index
 	if $index.completedDownloads downloads; then
 		local file pkg failed
+		# Don't sleep if there have been downloads.
+		$sleeper.stop
 		# Verify each package that was returned.
 		for pkg in $downloads; do
 			if ! $pkg.verify file; then
@@ -512,11 +514,7 @@ pu:Verify.run() {
 	# Display donwload stats, but only if there is a downloader and no
 	# downloads have been verified.
 	$session.getDownloader downloader
-	if [ -n "$downloads" ]; then
-		# Don't sleep if there have been downloads.
-		# This way the display will be updated faster.
-		$sleeper.stop
-	elif [ -n "$downloader" ]; then
+	if [ -z "$downloads" -a -n "$downloader" ]; then
 		local null jobs statusJobs speed full terminal file size
 		local progress line
 		# Get the terminal for the formatting functions.

@@ -214,7 +214,7 @@ bsda:download:Manager.runController() {
 	# WARN: This code relies on the serialize format!
 	lines="$(
 		echo "$lines" \
-			| /usr/bin/awk '{lines[$2] = $0} END {for (line in lines) print lines[line]}'
+			| /usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}'
 	)"
 
 	$this.getCompletedJobs jobs
@@ -562,6 +562,7 @@ bsda:download:Server.clean() {
 	downloads="$($this.getDownloads | /usr/bin/sed 's,.*:,,')"
 	if [ -n "$downloads" ]; then
 		/bin/kill $downloads 2> /dev/null
+		wait $downloads
 		$this.setDownloads
 	fi
 
@@ -617,6 +618,8 @@ bsda:download:Server.download() {
 	# The following block gets forked away, so nothing has to be declared
 	# local.
 	(
+		# Preliminary trap.
+		trap 'exit 0' sigint sigterm
 		# Needs to be defined when signal handling is activated.
 		$job.getTarget target
 
