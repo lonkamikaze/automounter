@@ -450,7 +450,7 @@ pu:Verify.panic() {
 }
 
 pu:Verify.run() {
-	local IFS session sleeper statPid
+	local IFS session sleeper
 	IFS='
 '
 
@@ -469,12 +469,7 @@ pu:Verify.run() {
 	$this.getPackages packages
 	# Get the completed downloads.
 	$session.getIndex index
-	# If reading the completed downloads takes too long, change the
-	# status display.
-	(trap 'exit 0' sigterm; /bin/sleep 2; /bin/kill -0 $bsda_obj_pid 2> /dev/null || exit 0; trap '' sigterm; $session.status "Verifying packages ...") &
-	statPid=$!
 	if $index.completedDownloads downloads; then
-		/bin/kill $statPid 2> /dev/null
 		local file pkg failed
 		# Verify each package that was returned.
 		for pkg in $downloads; do
@@ -500,8 +495,6 @@ pu:Verify.run() {
 		# Remove the completed packages from the todo list.
 		packages="$(echo "$packages" | /usr/bin/grep -vxF "$downloads")"
 		$this.setPackages "$packages"
-	else
-		/bin/kill $statPid 2> /dev/null
 	fi
 
 	# No packages left to verify?

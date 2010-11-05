@@ -631,7 +631,7 @@ bsda:download:Server.download() {
 		# The -T parameter is dangerous, do not mess with it unless
 		# you know what is safe to do.
 		set -T
-		trap '/bin/kill $(jobs -s) 2> /dev/null; wait; /bin/rm "$target" 2> /dev/null; exit 1' sigint sigterm
+		trap 'jobs="$(jobs -s)"; /bin/kill $jobs 2> /dev/null; /bin/pwait $jobs 2> /dev/null; /bin/rm "$target" 2> /dev/null; exit 1' sigint sigterm
 
 		$this.getSender sender
 		$this.getLocation location
