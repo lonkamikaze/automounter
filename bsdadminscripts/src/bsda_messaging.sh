@@ -131,7 +131,13 @@ bsda:obj:createInterface bsda:messaging:Sender \
 # An interface for messengers that allow bi-directional communication.
 #
 bsda:obj:createInterface bsda:messaging:Messenger \
+	"
+	# A Messenger has to provide all the methods expected from a Listener.
+	#"\
 	extends:bsda:messaging:Listener \
+	"
+	# A Messenger has to provide all the methods expected from a Sender.
+	#"\
 	extends:bsda:messaging:Sender \
 
 #
