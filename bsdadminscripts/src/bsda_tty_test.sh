@@ -11,7 +11,8 @@ for file in *; do
 	$term.line $((index % 5  + 1)) "$status"
 	index=$((index + 1))
 done
-ls -f | grep -n '' | $term.stdout
-# Sleep to see whether status lines were preserved.
 sleep 1
+ls -f | grep -n '' | $term.stdout
+sleep 1
+# Sleep to see whether status lines were preserved.
 $term.delete

@@ -45,9 +45,6 @@ bsda_tty=1
 #	screen
 #	xterm-color
 #
-# Known bugs:
-#	Spaces at the beginning of status lines get lost upon redraw.
-#
 
 #
 # A list of useful termcap(5) capabilities, used with tput(1):
@@ -288,7 +285,7 @@ bsda:tty:Library.format() {
 
 		# Get the argument, empty arguments are replaced with 0 or
 		# space, depending on the padding setting.
-		arg="${1:-${pad:- }${pad#-}}"
+		arg="${1:-${pad:+${pad#-}}}"
 		arg="${arg:- }"
 		shift
 
@@ -448,7 +445,7 @@ bsda:obj:createClass bsda:tty:Terminal extends:bsda:tty:Library \
 #
 bsda:tty:Terminal.init() {
 	if [ -e /dev/tty ]; then
-		/usr/bin/tput vi > /dev/tty
+		#/usr/bin/tput vi > /dev/tty
 		$this.setActive 1
 		$this.setCount 0
 		$this.setVisible 1
@@ -467,7 +464,7 @@ bsda:tty:Terminal.clean() {
 	$this.getActive active
 	if [ -n "$active" ]; then
 		$this.hide
-		/usr/bin/tput ve > /dev/tty
+		#/usr/bin/tput ve > /dev/tty
 	fi
 
 	$this.flush
@@ -543,9 +540,7 @@ bsda:tty:Terminal.getDisplayBuffer() {
 	if [ $count -gt 0 ]; then
 		buffer="$(
 			$this.getBuffer \
-				| /usr/bin/head -n $count \
-				| /usr/bin/sed -E "s/(.{$maxco}).*/\\1/"
-			echo -n .
+				| /usr/bin/sed -nE -e "s/(.{$maxco}).*/\\1/" -e p -e "$count{i\\${IFS}.${IFS}q${IFS}}"
 		)"
 	else
 		buffer=
@@ -997,7 +992,7 @@ bsda:tty:Terminal.line() {
 		# Crop the line to display.
 		maxco=$(/usr/bin/tput co 2> /dev/tty || echo 80)
 		/usr/bin/tput xn || maxco=$((maxco - 1))
-		line="$(echo "$2" | /usr/bin/sed -E -e '1!d' -e "1s/(.{$maxco}).*/\\1/")"
+		line="$(echo "$2" | /usr/bin/sed -E -e "s/(.{$maxco}).*/\\1/" -e q)"
 
 		# Jump to the right line.
 		/usr/bin/tput cr $(test $pos -gt 0 && /usr/bin/jot -b do $pos) ce
@@ -1008,9 +1003,8 @@ bsda:tty:Terminal.line() {
 	fi > /dev/tty
 
 	# Store the new line in the status line buffer.
-	$this.getCount count
-	buffer="$($this.getBuffer | /usr/bin/sed "$((pos + 1))c\\$IFS${2%%$IFS*}\\$IFS" ; echo -n .)"
-	$this.setBuffer "${buffer%$IFS.}"
+	buffer="$($this.getBuffer | /usr/bin/sed -n -e "$((pos + 1))c\\$IFS${2:+\\${2%%$IFS*}}" -e p -e "\$i\\$IFS.")"
+	$this.setBuffer "${buffer%.}"
 
 	return 0
 }
@@ -1070,14 +1064,14 @@ bsda:tty:Terminal.stdout() {
 	# line drawing and cursor placing.
 	#
 
+	# Get the number of status lines to display and acquire them
+	# from the buffer.
+	$this.getDisplayBuffer buffer count
+
 	# The return value.
 	status=0
 	# Only perform all that fancy stuff in visible mode.
-	if [ -n "$active" -a -n "$visible" -a $maxli -gt 1 ]; then
-		# Get the number of status lines to display and acquire them
-		# from the buffer.
-		$this.getDisplayBuffer buffer count
-
+	if [ -n "$active" -a -n "$visible" -a $maxli -gt 1 -a $count -gt 0 ]; then
 		# Get the maximum lines left for output.
 		if [ $((count)) -eq 0 ]; then
 			maxli=$((maxli - 1))
@@ -1091,7 +1085,6 @@ bsda:tty:Terminal.stdout() {
 			draw="$(
 				echo -n "$output" \
 					| ${bsda_dir:-.}/head.awk $maxco $maxli $tabstops $glitch
-				echo -n .$?
 			)"
 			# The number of lines is returned by the script.
 			lines="${draw##*.}"
@@ -1099,7 +1092,7 @@ bsda:tty:Terminal.stdout() {
 
 			# Filter characters that might endanger glob pattern
 			# substitution.
-			discard="$(echo "$draw." | /usr/bin/tr '#[]*{}' '??????')"
+			discard="$(echo -n "$draw." | /usr/bin/tr '#[]*{}' '??????')"
 			discard="${discard%.}"
 
 			# Remove the current draw from the remaining output.
@@ -1111,9 +1104,9 @@ bsda:tty:Terminal.stdout() {
 
 			# Put the output on stdout.
 			echo -n "$draw"
-			/usr/bin/tput sc > /dev/tty
+			/usr/bin/tput cr  > /dev/tty
 			echo -n "$buffer" > /dev/tty
-			/usr/bin/tput rc > /dev/tty
+			/usr/bin/tput cr $(/usr/bin/jot -b up $count ) do > /dev/tty
 		done
 	else
 		# Simply output stuff.

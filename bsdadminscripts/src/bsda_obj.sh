@@ -890,7 +890,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # The interpreting shell command. This can be used when this information is
 # needed by other programs like lockf(1).
 #
-readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $0${*:+ $*}\$,,1" -e 's,^\[,,' -e 's,]$,,')"
+readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $(echo "$0${*:+ $*}" | /usr/bin/tr '*?][^$,' '.......')\$,,1" -e 's,^\[,,' -e 's,]$,,')"
 
 #
 # The PID to use for creating new objects. When forking a session use the

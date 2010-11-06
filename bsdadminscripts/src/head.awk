@@ -47,10 +47,6 @@ BEGIN {
 	TABSTOPS = ARGV[3];
 	GLITCH = ARGV[4];
 
-	# Cannot return values above 255.
-	if (MAXLI > 255)
-		MAXLI = 255;
-
 	# Throw them away, so they won't be openend as files.
 	for (i = 1; i <= 4; i++)
 		ARGV[i] = null;
@@ -137,8 +133,9 @@ function process(char) {
 
 	# Stop when the wanted line is met.
 	# But put out eaten tabs first.
-	if (line >= MAXLI && !(eattabs && char == "\t"))
-		exit(line);
+	if (line >= MAXLI && !(eattabs && char == "\t")) {
+		exit(0);
+	}
 
 	# Calculate the xpos, line, behind this char.
 	if (char == "\n") {
@@ -189,6 +186,6 @@ END {
 	if (!line)
 		filterUtf8("\n");
 
-	exit(line);
+	printf("." line);
 }
 

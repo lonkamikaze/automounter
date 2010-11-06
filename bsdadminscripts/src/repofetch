@@ -31,8 +31,12 @@ bsda_dir="%%DATADIR%%"
 bsda_dir="${0%/${0##*/}}"
 #hack
 
-#prefix="%%PREFIX%%"
+prefix="%%PREFIX%%"
+tmp="%%TMP%%"
+#HACK
 prefix="/usr/local"
+tmp="/tmp"
+#hack
 
 # Include framework for object oriented shell scripting.
 . ${bsda_dir:-.}/bsda_obj.sh
@@ -45,6 +49,9 @@ prefix="/usr/local"
 
 # Include scheduler library.
 . ${bsda_dir:-.}/bsda_scheduler.sh
+
+# Include messaging library.
+. ${bsda_dir:-.}/bsda_messaging.sh
 
 readonly rf_ERR_PARAM_COMMAND_UNKNOWN=1
 readonly rf_ERR_PARAM_COMMAND_AMBIGUOUS=2
@@ -112,7 +119,7 @@ rf_session_read() {
 #
 rf_session_write() {
 	/bin/mkdir -p "${rf_session_file%/*}"
-	$rf_session.serializeDeep | /usr/bin/lockf -ks "$rf_session_file" /usr/bin/bzip2 2> /dev/null > "$rf_session_file"
+	(echo "bsda_obj_pid='$bsda_obj_pid';"; $rf_session.serializeDeep) | /usr/bin/lockf -ks "$rf_session_file" /usr/bin/bzip2 2> /dev/null > "$rf_session_file"
 }
 
 #
@@ -314,7 +321,7 @@ rf_fetch() {
 #	integer or floating point number, it is ignored.
 #
 rf_monitor() {
-	local interval
+	local interval lock
 
 	if ! rf_session_exists; then
 		$rf_terminal.stderr "ERROR: The session '$rf_session_name' does not exist!"
@@ -322,13 +329,19 @@ rf_monitor() {
 	fi
 
 	rf_session_read
-	
+
+	bsda:messaging:Lock lock "$tmp/$bsda_obj_pid.monitor.lock"
+	$lock.lockRead
+
 	interval=2
 	if bsda:obj:isSimpleFloat "$1"; then
 		interval="$1"
 	fi
 
 	$rf_session.monitor $rf_terminal $interval
+
+	$lock.unlockRead
+	$lock.delete
 }
 
 #
@@ -461,7 +474,7 @@ rf:Session.fetch() {
 rf:Session.monitor() {
 	local terminal sleep downloader jobsActive plural
 	local serversCount jobs job line null file progress speed unit
-	local size full speedSum displayJob
+	local size full speedSum displayJob est
 
 	terminal="$1"
 
@@ -487,7 +500,7 @@ rf:Session.monitor() {
 
 		# Accumulate speed of all downloads in progress.
 		speedSum=0
-		displayJob="$(echo "$jobs" | grep -Fx "$displayJob")"
+		displayJob="$(echo "$jobs" | /usr/bin/grep -Fx "$displayJob")"
 		for job in $jobs; do
 			# Pick one job to be displayed.
 			if [ -z "$displayJob" ]; then
@@ -503,20 +516,20 @@ rf:Session.monitor() {
 		# annoying.
 		line=
 		if [ -n "$displayJob" ]; then
-			$displayJob.getStatus file size full null null progress speed
+			$displayJob.getStatus file size full null est progress speed
 			$terminal.convertBytes speed unit "$speed" 4
 			speed="$speed ${unit}b/s"
 			$terminal.convertBytes full unit "$full" 4
 			full="$full ${unit}b"
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
-			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "${file##*/}" "$size" "$full" "$progress" "$speed"
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) <9:s> <:s>h<02:d>m<02:d>s' "${file##*/}" "$size" "$full" "$progress" "$speed" $((est / 3600)) $((est % 3600 / 60)) $((est % 60))
 		fi
 		$terminal.line 1 "$line"
 
 		# show the summary.
 		plural=
 		test $jobsActive -ne 1 && plural=s
-		$terminal.format line "Downloading <${#serversCount}:d> file<-x:s> at <9:s>" "$jobsActive" "s" "$speedSum"
+		$terminal.format line "Downloading <${#serversCount}:d> file<-x:s> <9:s>" "$jobsActive" "$plural" "$speedSum"
 		$terminal.line 0 "$line"
 
 		# Get the completed jobs, display them and forget them.
