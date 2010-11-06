@@ -40,6 +40,8 @@ bsda_scheduler=1
 #	bsda:scheduler:Sleep		Sleep process
 #	bsda:scheduler:RoundTripScheduler
 #					A simple scheduler class
+#	bsda:scheduler:ProcessQueue	Runs a different process each time
+#					it is invoked
 #
 
 
@@ -50,26 +52,70 @@ bsda_scheduler=1
 # itself as a process for the scheduler.
 #
 bsda:obj:createInterface bsda:scheduler:Process \
+	"
+	# This method is called by Scheduler instances, when the Process
+	# instance is scheduled for execution.
+	#"\
 	x:run \
-		"This method is repeatedly called by the scheduler." \
+	"
+	# This method is called by Scheduler instances, when the Scheduler
+	# is stopped.
+	#
+	# Its purpose is to provide a last opportunity for a process to
+	# clean up its resources.
+	#"\
 	x:stop \
-		"This method can be called by a scheduler when it is" \
-		"stopped." \
 
 #
 # This interface has to be implemented by every scheduler.
 #
 bsda:obj:createInterface bsda:scheduler:Scheduler \
+	"
+	# Schedulers are also processes, this allows nesting them, providing
+	# a simple priorization mechanism.
+	#"\
 	extends:bsda:scheduler:Process \
+	"
+	# This method is called to register a processes.
+	#
+	# @param 1
+	#	An instance of Process, if not given the calling object is
+	#	registered.
+	# @return 0
+	#	If registering succeeds.
+	# @return 1
+	#	The given object is not a Process instance.
+	# @return *
+	#	Implementations can define their own set of failure conditions.
+	#"\
 	x:register \
-		"This method is called to register a processes." \
+	"
+	# This method is called to unregister a process.
+	#
+	# @param 1
+	#	The Process instance to unregister. If not given the calling
+	#	process is unregistered.
+	# @return 0
+	#	If unregistering succeeds.
+	# @return 1
+	#	If the given process is not a Process instance.
+	# @return 2
+	#	If the given process is not registered.
+	# @return *
+	#	Implementations can define their own set of failure conditions.
+	#"\
 	x:unregister \
-		"This method is called to unregister a process." \
+	"
+	# This method is called to hand control over to the Scheduler.
+	#"\
 	x:run \
-		"This method is called to hand control over to the" \
-		"scheduler." \
+	"
+	# This method should stop the scheduler.
+	#
+	# Implementations are required to call the stop() method of all
+	# registered Process instances.
+	#"\
 	x:stop \
-		"This method should stop the scheduler."
 
 #
 # This class implements a sleeping process that can be used to lay a scheduler
