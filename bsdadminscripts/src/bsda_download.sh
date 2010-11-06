@@ -1297,7 +1297,8 @@ bsda:download:Job.hasSucceeded() {
 # @param 4
 #	The variable for the number of seconds passed downloading.
 # @param 5
-#	The variable for the expected number of seconds left downloading.
+#	The variable for the expected number of seconds left downloading,
+#	always returns values below 10 hours.
 # @param 6
 #	The variable for the progress in %.
 # @param 7
@@ -1322,9 +1323,8 @@ bsda:download:Job.getStatus() {
 		# A download is in progress or has started.
 
 		# Get the current file size, assume at least 1 byte.
-		realsize=$(wc -c "$target" 2> /dev/null)
-		realsize=${realsize% *}
-		test $((realsize)) -eq 0 && realsize=1
+		realsize=$(/usr/bin/wc -c "$target" 2> /dev/null || echo 0)
+		realsize=$((${realsize% $target*}))
 
 		# The download has not yet completed, so we use NOW to
 		# calculate progress and speed.
@@ -1343,14 +1343,20 @@ bsda:download:Job.getStatus() {
 		speed=$((realsize / passed))
 
 		# Seconds left, add a 10% 'bonus' to the prediction for safety.
-		predict=$(((passed * size / realsize - passed) * 11 / 10))
+		predict=35999
+		if [ $realsize -gt 0 ]; then
+			predict=$(((passed * size / realsize - passed) * 11 / 10))
+			if [ $predict -ge 36000 ]; then
+				predict=35999
+			fi
+		fi
 	else
 		# No progress.
 		realsize=0
 		passed=0
 		progress=0
 		speed=0
-		predict=0
+		predict=35999
 	fi
 
 	# Return all the results

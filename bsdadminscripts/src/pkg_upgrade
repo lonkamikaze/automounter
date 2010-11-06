@@ -398,6 +398,8 @@ bsda:obj:createClass pu:Verify \
 		"The controlling session." \
 	w:private:statusJobs \
 		"The last displayed download job." \
+	w:private:count \
+		"The amount of packages to verify." \
 	w:private:packages \
 		"The list of packages to verify." \
 	w:private:failed \
@@ -408,13 +410,16 @@ bsda:obj:createClass pu:Verify \
 		"Delete private objects." \
 
 pu:Verify.init() {
-	local session
+	local session terminal
 	$caller.getObject session
 	$this.setSession $session
 	$this.setPackages "$1"
 	$session.status "Verifying packages ..."
 	$session.verbose "Verifying packages."
 	bsda:scheduler:Sleep ${this}sleeper 2
+	$session.getTerminal terminal
+	$terminal.use 2
+	$this.setCount $(($(echo "$1" | /usr/bin/wc -w)))
 }
 
 pu:Verify.clean() {
@@ -424,7 +429,7 @@ pu:Verify.clean() {
 }
 
 pu:Verify.resume() {
-	local IFS session index packages failed
+	local IFS session index packages failed terminal
 	IFS='
 '
 
@@ -436,37 +441,56 @@ pu:Verify.resume() {
 	# Reschedule previously failed packages.
 	$this.getPackages packages
 	$this.setPackages "$packages${packages:+${failed:+$IFS}}$failed"
+	# Setup terminal for a second status line.
+	$session.getTerminal terminal
+	$terminal.use 2
 }
 
 pu:Verify.panic() {
-	local sleeper
+	local sleeper session terminal
 
 	# Reset the sleeper.
 	$this.getSleeper sleeper
 	$sleeper.stop
 
-	# It's not guaranteed that the job still exists, so get rid of it.
-	$this.setStatusJob
+	# It's not guaranteed that the jobs still exists, so get rid of them.
+	$this.setStatusJobs
+
+	# Restore single line status.
+	$this.getSession session
+	$session.getTerminal terminal
+	$terminal.use 2
 }
 
 pu:Verify.run() {
-	local IFS session sleeper
+	local IFS session sleeper index packages downloads terminal count
 	IFS='
 '
 
-	# Make sure this only runs every second.
+	#
+	# First produce the number of completed packages.
+	#
+
+	# Get the list of packages yet to verify.
+	$this.getPackages packages
+	# Get the terminal.
+	$this.getSession session
+	$session.getTerminal terminal
+	# Output the number of completed packages.
+	$this.getCount count
+	$terminal.line 1 "$(/usr/bin/printf "Package %${#count}d of $count verified." $((count - $(echo "$packages" | /usr/bin/wc -w) )) )"
+	
+	#
+	# Sleep!
+	#
 	$this.getSleeper sleeper
 	$sleeper.run
 
-	$this.getSession session
 
 	#
 	# Verify completed downloads.
 	#
-	local index packages downloads
 
-	# Get the list of packages yet to verify.
-	$this.getPackages packages
 	# Get the completed downloads.
 	$session.getIndex index
 	if $index.completedDownloads downloads; then
@@ -503,6 +527,7 @@ pu:Verify.run() {
 	if [ -z "$packages" ]; then
 		# Leave this state.
 		$session.changeState
+		$terminal.use 1
 		return
 	fi
 
@@ -515,10 +540,8 @@ pu:Verify.run() {
 	# downloads have been verified.
 	$session.getDownloader downloader
 	if [ -z "$downloads" -a -n "$downloader" ]; then
-		local null jobs statusJobs speed full terminal file size
-		local progress line
-		# Get the terminal for the formatting functions.
-		$session.getTerminal terminal
+		local null jobs statusJobs speed full file size
+		local progress line est
 		# Get the currently running downloads.
 		$downloader.getStatus null null null jobs
 
@@ -534,13 +557,13 @@ pu:Verify.run() {
 
 		# Display the first job.
 		if [ -n "$statusJobs" ]; then
-			${statusJobs%%$IFS*}.getStatus file size full null null progress speed
+			${statusJobs%%$IFS*}.getStatus file size full null est progress speed
 			$terminal.convertBytes speed unit "$speed" 4
 			speed="$speed ${unit}b/s"
 			$terminal.convertBytes full unit "$full" 4
 			full="$full ${unit}b"
 			$terminal.convertBytesToUnit size "$unit" "$size" 4
-			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) at <9:s>' "$file" "$size" "$full" "$progress" "$speed"
+			$terminal.format line '<-x-:s> <4:s> of <:s> (<3:d>%%) <9:s> <:s>h<02:d>m<02:d>s' "${file##*/}" "$size" "$full" "$progress" "$speed" $((est / 3600)) $((est % 3600 / 60)) $((est % 60))
 			$session.status "$line"
 		else
 			$session.status "Waiting for downloads ..."
