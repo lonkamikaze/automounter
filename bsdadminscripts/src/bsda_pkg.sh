@@ -36,6 +36,8 @@ bsda_pkg=1
 # Offers classes for package handling.
 #
 
+#TODO need to think about better exceptions.
+
 # Package exceptions.
 readonly bsda_pkg_ERR_PACKAGE_CONTENTS_FORMAT=1
 readonly bsda_pkg_ERR_PACKAGE_ORIGIN_UNMATCHED=2
@@ -50,20 +52,22 @@ readonly bsda_pkg_ERR_PACKAGE_OLD_NAME_AMBIGUOUS=10
 readonly bsda_pkg_ERR_PACKAGE_OLD_ORIGIN_UNMATCHED=11
 readonly bsda_pkg_ERR_PACKAGE_OLD_NAME_UNMATCHED=12
 readonly bsda_pkg_ERR_PACKAGE_OLD_CONFLICT=13
+readonly bsda_pkg_ERR_PACKAGE_BACKUP_MISS=14
+readonly bsda_pkg_ERR_PACKAGE_BACKUP_UNKNOWN=15
 
 # Index exceptions.
-readonly bsda_pkg_ERR_INDEX_FILE_MISSING=14
-readonly bsda_pkg_ERR_INDEX_MOVED_MISSING=15
+readonly bsda_pkg_ERR_INDEX_FILE_MISSING=16
+readonly bsda_pkg_ERR_INDEX_MOVED_MISSING=17
 
 # Moved exceptions.
-readonly bsda_pkg_ERR_MOVED_FILE_MISSING=16
+readonly bsda_pkg_ERR_MOVED_FILE_MISSING=18
 
 # File exceptions.
-readonly bsda_pkg_ERR_DOWNLOADER_INVALID=17
-readonly bsda_pkg_ERR_FILE_DIR_PERM=18
-readonly bsda_pkg_ERR_BACKUP_DIR_PERM=19
-readonly bsda_pkg_ERR_FILE_MISSING=20
-readonly bsda_pkg_ERR_FILE_INVALID=21
+readonly bsda_pkg_ERR_DOWNLOADER_INVALID=19
+readonly bsda_pkg_ERR_FILE_DIR_PERM=20
+readonly bsda_pkg_ERR_BACKUP_DIR_PERM=21
+readonly bsda_pkg_ERR_FILE_MISSING=22
+readonly bsda_pkg_ERR_FILE_INVALID=23
 
 # INDEX columns.
 readonly bsda_pkg_IDX_PKG=1
@@ -1295,6 +1299,8 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Result buffer for the isReinstall() method." \
 	-:installed \
 		"Result buffer for the isInstalled() method." \
+	r:private:backup \
+		"Stores the names of files to backup." \
 	r:private:depNames \
 		"A list of dependency names." \
 	r:public:origin \
@@ -1317,12 +1323,24 @@ bsda:obj:createClass bsda:pkg:Package \
 		"Check whether this is a reinstall without version changes." \
 	x:public:isInstalled \
 		"Check whether a version of this package is installed." \
-	x:public:fetch \
-		"Fetch a package if necessary." \
+	x:public:hasBackup \
+		"Check whether the package is backed up." \
 	x:protected:fetchRequired \
 		"Returns whether fetching the package is necessary." \
+	x:public:fetch \
+		"Fetch a package if necessary." \
 	x:public:verify \
 		"Verify the package file and adopt it." \
+	x:public:backup \
+		"Backup the package and all moved packages." \
+	x:private:preInstall \
+		"Prepares everything for install." \
+	x:private:postInstall \
+		"Removes rollback data after successful install." \
+	x:private:rollBack \
+		"Rolls back changes after a failing install." \
+	x:public:install \
+		"Updates or (re)installs a package." \
 
 #
 # The constructor initializes all the attributes.
@@ -1497,6 +1515,58 @@ bsda:pkg:Package.isInstalled() {
 }
 
 #
+# Returns whether this package has sufficient backups for a rollback.
+#
+# This criteria is matched when all original packages replaced are backed up.
+#
+# @return 0 (true)
+#	All required backups are present.
+# @return 1 (false)
+#	At least one backup is missing.
+#
+bsda:pkg:Package.hasBackup() {
+	local IFS index suffix dir backup pkg
+
+	IFS='
+'
+	# Get backup info.
+	$this.getIndex index
+	$index.getBackupSuffix suffix
+	$index.getBackupDir dir
+
+	if eval "[ -z \"\$${this}backup\" ]"; then
+		local IFS origin origins
+		# Get backup origins.
+		$this.getOrigin origin
+		$this.getMoved origins
+		origins="${origins:+$origins$IFS}$origin"
+
+		# Get the names of backup files.
+		backup=
+		for origin in $origins; do
+			pkg="$(/usr/sbin/pkg_info -qO "$origin")"
+			if [ -n "$pkg" ]; then
+				backup="$backup${backup:+$IFS}$pkg"
+			fi
+		done
+
+		setvar ${this}backup "$backup"
+	fi
+
+	$this.getBackup backup
+	# Check each package to backup.
+	for pkg in $backup; do
+		# Check if a backup exists and is newer than the currently
+		# installed package.
+		if [ ! "$dir/$pkg$suffix" -nt "${PKG_DBDIR:-/var/db/pkg}/$pkg" ]; then
+			return 1
+		fi
+	done
+
+	return 0
+}
+
+#
 # Fetch a package file if not present.
 #
 # If no download manager is present or the package is already paired with a
@@ -1646,6 +1716,94 @@ bsda:pkg:Package.verify() {
 	bsda:pkg:File ${this}file "$file"
 	setvar ${this}file
 	return 0
+}
+
+#
+# Backs up all packages replaced if this one is installed.
+#
+# @throws bsda_pkg_ERR_PACKAGE_BACKUP_MISS
+#	Thrown if the backup of a package fails, because the package to
+#	backup is missing.
+# @throws bsda_pkg_ERR_PACKAGE_BACKUP_UNKNOWN
+#	Thrown if the backup of a package fails.
+#
+bsda:pkg:Package.backup() {
+	local IFS index suffix dir backup pkg errno result output
+
+	IFS='
+'
+	# Get backup info.
+	$this.getIndex index
+	$index.getBackupSuffix suffix
+	$index.getBackupDir dir
+
+	result=0
+
+	# Make sure the list of files is populated.
+	$this.hasBackup
+	# Check each package to backup.
+	$this.getBackup backup
+	for pkg in $backup; do
+		# Check if a backup exists and is newer than the currently
+		# installed package.
+		if [ ! "$dir/$pkg$suffix" -nt "${PKG_DBDIR:-/var/db/pkg}/$pkg" ]; then
+			/usr/sbin/pkg_create -b "$pkg" "$dir/$pkg$suffix" 2> /dev/null
+			errno=$?
+			case $errno in
+			0 | 2)
+				# No error or 'just' missing files.
+			;;
+			1)
+				# Package to backup is missing
+				bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_BACKUP_MISS
+				result=1
+			;;
+			*)
+				# Fatal error.
+				bsda_pkg_errno=$bsda_pkg_ERR_PACKAGE_BACKUP_UNKNOWN
+				result=1
+			;;
+			esac
+		fi
+	done
+
+	return $result
+}
+
+#
+# Sets everything up for install.
+#
+# I.e. moves old packages out of the way, just by renaming stuff, so changes
+# can be rolled back in case of failure.
+#
+bsda:pkg:Package.preInstall() {
+	return
+}
+
+#
+# Deletes the stuff moved out of the way by preInstall().
+#
+# This is colled by install() in case of success.
+#
+bsda:pkg:Package.postInstall() {
+	return
+}
+
+#
+# Reconstructs the original state present prior to running preInstall().
+#
+# This is called by install() in case of failure.
+#
+bsda:pkg:Package.rollBack() {
+	return
+}
+
+bsda:pkg:Package.install() {
+	local pkgname origin moved
+
+	$this.getMoved moved
+	$this.getOrigin origin
+	$this.getName pkgname
 }
 
 #

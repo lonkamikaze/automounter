@@ -58,6 +58,7 @@ bsda_obj=1
 # 10) SERIALIZE
 # 10.1) Serializing
 # 10.2) Deserializing
+# 10.3) Filtering
 # 11) FORKING PROCESSES
 # 12) REFLECTION & REFACTORING
 # 12.1) Attributes
@@ -617,7 +618,7 @@ bsda_obj=1
 # This example loads the object $configuration from a file and restores it.
 #
 #	# Deserialize the data and get the object reference.
-#	bsda:obj:deserialize configuration - < ~/.myconfig
+#	bsda:obj:deserialize configuration < ~/.myconfig
 #
 # After the last line the $configuration object can be used exactly like
 # in the previous session.
@@ -626,13 +627,27 @@ bsda_obj=1
 # the bsda:obj:deserialize() function should always be used to ensure that
 # deserialization happens in a controlled environment.
 #
-# @param 1
-#	The name of the variable to store the object ID (reference) of the
-#	serialized object in.
+# @param &1
+#	The name of the variable to store the deserialized object reference
+#	in. If empty the reference will be output to stdout.
 # @param 2
-#	This is expected to be a serialized string. In the special case that
-#	this parameter is a dash (the charachter "-"), the serialized string
-#	will be read from stdin.
+#	If given this is the string to be serialized, otherwise it will be
+#	expected on stdin.
+#
+# 10.3) Filtering
+#
+# Sometimes a lot of serialized data has to be deserialized that contains
+# stale objects. For such cases the serialized data can be filtered to contain
+# only the last occurance of each object.
+#
+#	bsda:obj:serializedUniq serialized "$serialized"
+#
+# @param &1
+#	The name of the variable to store the resulting string in.
+#	If empty the string is output to stdout.
+# @param 2
+#	If given this is the serialized data, otherwise it will be
+#	expected on stdin.
 #
 
 #
@@ -890,7 +905,7 @@ readonly bsda_obj_frameworkPrefix=BSDA_OBJ_
 # The interpreting shell command. This can be used when this information is
 # needed by other programs like lockf(1).
 #
-readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $(echo "$0${*:+ $*}" | /usr/bin/tr '*?][^$,' '.......')\$,,1" -e 's,^\[,,' -e 's,]$,,')"
+readonly bsda_obj_interpreter="$(/bin/ps -wwo args= -p $$ | /usr/bin/sed -e "s, $(echo "$0${*:+ $*}" | /usr/bin/tr '*?][^$,{}' '.........')\$,,1" -e 's,^\[,,' -e 's,]$,,')"
 
 #
 # The PID to use for creating new objects. When forking a session use the
@@ -1470,12 +1485,6 @@ bsda:obj:createClass() {
 			IFS='
 '
 
-			# Check whether this has already been serialized.
-			if echo \"\$this\" | /usr/bin/grep -qFx \"\$bsda_obj_serializeBlacklist\"; then
-				# Already serialized, return.
-				return 0
-			fi
-
 			# Check whether this is the root call.
 			if [ -z \"\$bsda_obj_serializeBlacklist\" ]; then
 				rootCall=1
@@ -1490,7 +1499,7 @@ bsda:obj:createClass() {
 				# Echo each attribute.
 				for attribute in \$(echo '$attributes'); do
 					eval \"echo \\\"\\\${\$this\$attribute}\\\"\"
-				done | egrep -o '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | sort -u
+				done | /usr/bin/egrep -o '$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_' | /usr/bin/grep -vFx \"\$bsda_obj_serializeBlacklist\" | /usr/bin/sort -u
 			)\"
 
 			# Serialize all required objects.
@@ -1838,33 +1847,56 @@ bsda:obj:getSerializedId() {
 # Deserializes a serialized object and returns or outputs a reference to
 # said object.
 #
-# @param 1
-#	If there is a second parameter this is the name of the variable to
-#	store the object reference in. Otherwise this is the serialized string
-#	and the reference is output to stdout.
+# @param &1
+#	The name of the variable to store the deserialized object reference
+#	in. If empty the reference will be output to stdout.
 # @param 2
-#	If given this is the serialized string and the object reference is
-#	saved in the variable named with the first parameter.
+#	If given this is the string to be serialized, otherwise it will be
+#	expected on stdin.
 #
 bsda:obj:deserialize() {
-	if [ "$2" = "-" ]; then
-		set -- "$1" "$(cat)"
-	elif [ "$1" = "-" ]; then
-		set -- "$(cat)"
+	if [ $# -lt 2 ]; then
+		set -- "$1" "$(/bin/cat)"
 	fi
 
-	if [ -n "$2" ]; then
+	if [ -n "$1" ]; then
 		setvar "$1" "${2##* }"
-		local IFS
-		IFS='
-'
-		eval "$2"
 	else
-		echo "${1##* }"
-		local IFS
-		IFS='
+		echo "${2##* }"
+	fi
+
+	local IFS
+	IFS='
 '
-		eval "$1"
+	eval "$2"
+}
+
+#
+# Filters the given string of serialized data to only contain the last
+# representation of each object.
+#
+# The order of objects may be subject to change.
+#
+# @param &1
+#	The name of the variable to store the resulting string in.
+#	If empty the string is output to stdout.
+# @param 2
+#	If given this is the serialized data, otherwise it will be
+#	expected on stdin.
+#
+bsda:obj:serializedUniq() {
+	if [ -n "$1" ]; then
+		if [ -n "$2" ]; then
+			setvar "$1" "$(echo "$2" | /usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}')"
+		else
+			setvar "$1" "$(/usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}')"
+		fi
+	else
+		if [ -n "$2" ]; then
+			echo "$2" | /usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}'
+		else
+			/usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}'
+		fi
 	fi
 }
 
@@ -1877,7 +1909,7 @@ bsda:obj:deserialize() {
 #	0 for objects, 1 for everything else.
 #
 bsda:obj:isObject() {
-	echo "$1" | egrep -qxe "$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_"
+	echo "$1" | /usr/bin/egrep -qxe "$bsda_obj_frameworkPrefix[_[:alnum:]]+_[0-9a-f]+_[0-9]+_[0-9]+_[0-9]+_"
 }
 
 #
@@ -1890,7 +1922,7 @@ bsda:obj:isObject() {
 #	0 for integers, 1 for everything else.
 #
 bsda:obj:isInt() {
-	echo "$1" | egrep -qxe "[-+]?[0-9]+"
+	echo "$1" | /usr/bin/egrep -qxe "[-+]?[0-9]+"
 }
 
 #
@@ -1902,7 +1934,7 @@ bsda:obj:isInt() {
 #	0 for unsigned integers, 1 for everything else.
 #
 bsda:obj:isUInt() {
-	echo "$1" | egrep -qxe "\+?[0-9]+"
+	echo "$1" | /usr/bin/egrep -qxe "\+?[0-9]+"
 }
 
 #
@@ -1926,7 +1958,7 @@ bsda:obj:isUInt() {
 #	0 for floats, 1 for everything else.
 #
 bsda:obj:isFloat() {
-	echo "$1" | egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?(e(-|\+)?[0-9]+)?"
+	echo "$1" | /usr/bin/egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?(e(-|\+)?[0-9]+)?"
 }
 
 #
@@ -1946,7 +1978,7 @@ bsda:obj:isFloat() {
 #	0 for simple floats, 1 for everything else.
 #
 bsda:obj:isSimpleFloat() {
-	echo "$1" | egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?"
+	echo "$1" | /usr/bin/egrep -qxe "[-+]?[0-9]+(\.[0-9]+)?"
 }
 
 #

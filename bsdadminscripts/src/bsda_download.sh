@@ -211,11 +211,7 @@ bsda:download:Manager.runController() {
 '
 
 	# Only deserialize the latest version of each object.
-	# WARN: This code relies on the serialize format!
-	lines="$(
-		echo "$lines" \
-			| /usr/bin/awk '{lines[$NF] = $0} END {for (line in lines) print lines[line]}'
-	)"
+	bsda:obj:serializedUniq lines "$lines"
 
 	$this.getCompletedJobs jobs
 	for line in $lines; do
@@ -750,9 +746,6 @@ bsda:download:Server.run() {
 		return 0
 	fi
 
-	# Get the scheduler.
-	$this.getScheduler scheduler
-
 	# Go through all messages.
 	manager=
 	for message in $messages; do
@@ -808,6 +801,7 @@ bsda:download:Server.run() {
 	# Unregister from the scheduler if all downloads have been completed.
 	if [ -z "$downloads" ]; then
 		# Unregister from the scheduler.
+		$this.getScheduler scheduler
 		$scheduler.unregister
 	fi
 }

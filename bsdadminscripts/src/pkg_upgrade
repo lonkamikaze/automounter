@@ -49,7 +49,12 @@ fi
 #
 # Set sane environment defaults.
 #
-: ${PACKAGES="$(make -V PACKAGES -f /usr/share/mk/bsd.port.mk 2> /dev/null)"}
+
+# The default PACKAGES depends on whether packages are locally available.
+if [ -d "${PACKAGESITE%/*?}" ]; then
+	: ${PACKAGES="${PACKAGESITE%/*?}"}
+fi
+: ${PACKAGES="$(/usr/bin/make -V PACKAGES -f /usr/share/mk/bsd.port.mk 2> /dev/null)"}
 #HACK
 : ${PACKAGES=/usr/ports/packages}
 : ${PKG_DBDIR=/var/db/pkg}
@@ -59,7 +64,8 @@ fi
 : ${PKG_DBDIR=%%VAR%%/db/pkg}
 : ${TMPDIR=%%TMP%%}
 : ${PKG_TMPDIR=$TMPDIR}
-: ${PKG_BACKUP_SUFX=.tbz}
+# Default for speed over strong compression.
+: ${PKG_BACKUP_SUFX=.tgz}
 : ${PKG_BACKUP_DIR="${PACKAGES%/}/pkg_upgrade-backup"}
 : ${PKG_FILE_SUFX=.tbz}
 : ${RUNDIR=$rundir}
@@ -390,7 +396,7 @@ bsda:obj:createInterface pu:Stage \
 #
 #
 bsda:obj:createClass pu:Verify \
-	implements:bsda:scheduler:Process \
+	implements:pu:Stage \
 	w:private:sleeper \
 		"A sleeping process, so this doesn't eat a whole core when" \
 		"waiting for downloads." \
@@ -400,6 +406,8 @@ bsda:obj:createClass pu:Verify \
 		"The last displayed download job." \
 	w:private:count \
 		"The amount of packages to verify." \
+	w:private:verified \
+		"The amount of packages currently verified." \
 	w:private:packages \
 		"The list of packages to verify." \
 	w:private:failed \
@@ -420,6 +428,7 @@ pu:Verify.init() {
 	$session.getTerminal terminal
 	$terminal.use 2
 	$this.setCount $(($(echo "$1" | /usr/bin/wc -w)))
+	$this.setVerified 0
 }
 
 pu:Verify.clean() {
@@ -464,6 +473,7 @@ pu:Verify.panic() {
 
 pu:Verify.run() {
 	local IFS session sleeper index packages downloads terminal count
+	local verified
 	IFS='
 '
 
@@ -478,13 +488,14 @@ pu:Verify.run() {
 	$session.getTerminal terminal
 	# Output the number of completed packages.
 	$this.getCount count
-	$terminal.line 1 "$(/usr/bin/printf "Package %${#count}d of $count verified." $((count - $(echo "$packages" | /usr/bin/wc -w) )) )"
+	$this.getVerified verified
 	
 	#
 	# Sleep!
 	#
 	$this.getSleeper sleeper
 	$sleeper.run
+	$terminal.line 1 "$(/usr/bin/printf "Package %${#count}d of $count verified." $verified)"
 
 
 	#
@@ -517,10 +528,14 @@ pu:Verify.run() {
 			else
 				$session.verbose "Verifying package file '${file##*/}' completed."
 			fi
+			verified=$((verified + 1))
+			$terminal.line 1 "$(/usr/bin/printf "Package %${#count}d of $count verified." $verified)"
 		done
 		# Remove the completed packages from the todo list.
 		packages="$(echo "$packages" | /usr/bin/grep -vxF "$downloads")"
 		$this.setPackages "$packages"
+		# Update the count of verified packages.
+		$this.setVerified $verified
 	fi
 
 	# No packages left to verify?
@@ -573,6 +588,22 @@ pu:Verify.run() {
 
 pu:Verify.stop() {
 }
+
+bsda:obj:createClass pu:Install \
+	implements:pu:Stage \
+	w:private:packages \
+		"The list of packages to process." \
+	i:private:init \
+		"Takes the list of packages to process." \
+	
+
+pu:Install.init() {
+	$this.setPackages "$1"
+}
+
+pu:Install.run() {
+}
+
 
 #
 # An instance of this class represents a pkg_upgrade session.
@@ -686,6 +717,11 @@ pu:Session.init() {
 	local IFS packages pkg
 	IFS='
 '
+
+time=$(date +%s)
+	#$this.serializeDeep | wc -l | $4.stdout
+$4.stdout $(($(date +%s) - time))
+
 	$this.getPackages packages
 	for pkg in $packages; do
 		$pkg.getOrigin
