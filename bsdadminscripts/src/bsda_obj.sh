@@ -2154,7 +2154,7 @@ bsda:obj:callerSetup() {
 bsda:obj:callerFinish() {
 	# Remove the bsda:obj:callerSetvar() wrapper.
 	unset -f $caller.setvar $caller.getObject $caller.getClass
-	# Decrement the call stack counter and delete if no longer required.
+	# Decrement the call stack counter.
 	bsda_obj_callStackCount=$(($bsda_obj_callStackCount - 1))
 
 	# Copy variables to the caller context.
