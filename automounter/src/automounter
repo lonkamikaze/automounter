@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4.4
+version=1.4.5
 
 # AMD parameters
 a="%%RUN%%/automounter.amd"
@@ -823,7 +823,7 @@ update() {
 
 	# Run detectors.
 	revisit=
-	for detector in mounted glabel iso9660 probe mounted; do
+	for detector in mounted iso9660 glabel probe mounted; do
 		/bin/sync
 		${detector}Detect
 	done
