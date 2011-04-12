@@ -1,3 +1,8 @@
+automounter-devel ():
+  - Priorize iso9660 detection over label detection, leads to less confusing
+    detection behaviour for optical media
+  - Apply more groff_mdoc(7) foo to manual pages
+
 automounter-1.4.4 (12 October 2010):
   - Fix kernel race, based on anonymous contribution, though I abused the
     situation to hone my awk skills.

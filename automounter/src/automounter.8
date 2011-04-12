@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 11 October 2010
+.Dd 16 January, 2011
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -159,10 +159,18 @@ during boot. These will be ignored.
 The first activity during an update call is device discovery. The entire
 configuration is rebuilt every time an update is called. To this
 end detector functions are called. The current detector functions are
-named mountedDetect(), glabelDetect(), iso9660Detect()  and probeDetect().
-Each of these functions calls the writeNode() function to record its
+named
+.Fn mountedDetect ,
+.Fn iso9660Detect ,
+.Fn glabelDetect
+and
+.Fn probeDetect .
+Each of these functions calls the
+.Fn writeNode
+function to record its
 discoveries and set up the necessary directory and link structure. The
-writeNode() function also performs the blacklisting checks. The detectors keep
+.Fn writeNode
+function also performs the blacklisting checks. The detectors keep
 a list of already probed devices, to avoid redundant work.
 .Pp
 The mounted detector discovers the currently mounted devices. This is
@@ -171,23 +179,24 @@ and thus prevents discovery by the glabel detector.
 The probe detector needs to be able to mount file systems, which does
 not work with already mounted geom providers, so it depends on this, too.
 .Pp
-The glabel detector uses the
-.Xr geom 8
-label class to identify file system types through labels. This is the
-traditional way of discovery for
-.Nm .
-.Pp
 The iso9660 detector simply assumes that devices conforming to certain name
 patterns are optical disk drives. This behaviour prevents detection failure
 if a drive does not hold a disk. The device pattern can be changed in the
 .Xr automounter.conf 5
 file.
 .Pp
+The glabel detector uses the
+.Xr geom 8
+label class to identify file system types through labels. This is the
+traditional way of discovery for
+.Nm .
+.Pp
 The probe detector takes the remaining geom providers reported by the
 .Xr gstat 8
 tool and simply tries to mount them as different file system types until
 it succeeds or runs out of file system types. Successfully mounted
-devices are unmonted and setup with writeNode().
+devices are unmonted and setup with
+.Fn writeNode .
 .Pp
 Afterwards the mount detector is called again to catch mounts that
 occured after the first run and prevented detection through the other
@@ -205,7 +214,9 @@ Afterwards, if activated, the
 .Xr geli 8
 managing function is started.
 .Pp
-The geliUpdate() function checks whether it is currently managing keys
+The
+.Fn geliUpdate
+function checks whether it is currently managing keys
 residing on no longer present file systems. The keys are removed from the
 list of available keys.
 .Pp
@@ -327,10 +338,10 @@ manual page. Keys are expected to reside in %%GELI_KEYS%% on a labeled
 partition and the images are expected to be stored in %%GELI_IMAGES%%.
 .Pp
 Devices have to be unresolvable symlinks from %%GELI_IMAGES%%. E.g. if you wish
-to enable auto attaching for %%DEVFS%%/da0s1 with a key named confidental you
+to enable auto attaching for %%DEVFS%%/da0s1 with a key named confidential you
 have to create a link in the following fashion:
 .Bd -literal -offset indent
-ln -s da0s1 "%%GELI_IMAGES%%/confidental"
+ln -s da0s1 "%%GELI_IMAGES%%/confidential"
 .Ed
 .Sh FILES
 .Bl -tag -width indent
@@ -372,4 +383,4 @@ The script has been tested on FreeBSD 8.1-STABLE
 .Xr amd 8 , Xr automounter.conf 5 , Xr rc 8 , Xr rc.conf 5 , Xr devd.conf 5 ,
 .Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 and Xr umount 8
 .Sh AUTHOR
-Dominic Fandrey <kamikaze@bsdforen.de>
+.An Dominic Fandrey Aq kamikaze@bsdforen.de
