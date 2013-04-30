@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2008 - 2010
+# Copyright (c) 2008 - 2013
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -332,7 +332,6 @@ geliUnmount() {
 	name="$2"
 	device="$3"
 	line="$name;$device;$label"
-
 	# Attempt to detach until successful or until the
 	# key has returned.
 	while true; do
@@ -360,10 +359,6 @@ geliUnmount() {
 				# need to detach.
 				exit 0
 			;;
-			1)
-				# Detach failed.
-				continue
-			;;
 			2)
 				# Detach succeeded.
 				echo "del encrypted provider:" \
@@ -372,7 +367,7 @@ geliUnmount() {
 				break
 			;;
 		esac
-		/bin/sleep 1
+		/bin/sleep "${w:-1}"
 	done
 
 	# Hang around to remove the device node for the image.
@@ -818,6 +813,7 @@ update() {
 	local device line partitions label type options
 	local hash owner mode key detector revisit
 	local devices_blacklist nodes_blacklist
+	local rerun
 
 	# Don't do anything if amd is not running.
 	# This prevents automounter from starting too early from devd.
@@ -869,6 +865,7 @@ update() {
 	done
 
 	# Update geli managed mounts.
+	rerun=
 	geliUpdate
 
 	# Finally reload amd map.
@@ -880,11 +877,21 @@ update() {
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
 
+	# Can be set by geliUpdate() to catch new decrypted devices.
+	if [ -n "$rerun" ]; then
+		update
+		return
+	fi
+
 	return 0
 }
 
 #
 # Update geli encrypted providers. Requires the oldnodes file to be intact.
+#
+# @param rerun
+#	Is set if update should be rerun because something was successfully
+#	attached (decrypted)
 #
 geliUpdate() {
 	# Do not run if geli features are not activated.
@@ -991,6 +998,7 @@ geliUpdate() {
 			&& /sbin/geli attach -p -k "$key" "$device"
 		then
 			# Remember success.
+			rerun=1
 			echo "add encrypted provider: <$name> as <$device>" \
 				"with key from <$label>"
 			echo "$name;$device;$label" >> "$geli_nodes"
@@ -1329,7 +1337,8 @@ case "$1" in
 		# Devd updates should only be performed if no update is
 		# running, because they can cause races.
 		shift
-		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
+		/usr/bin/lockf -st 0 "$lock" $0 locked "$@" &
+		return
 	;;
 	start | update | stop)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
