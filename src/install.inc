@@ -10,7 +10,7 @@ automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 for parameter; {
 	case "${parameter%%=*}" in
 		-prefix | -var | -run | -tmp | -media | -devfs | -map | -amd | \
-		-eli_images | -eli_keys)
+		-geli_images | -geli_keys)
 			value="${parameter#*=}"
 			parameter="${parameter%%=*}"
 			parameter="${parameter#-}"
@@ -52,7 +52,7 @@ replace="
 %%GELI_KEYS%%,$geli_keys
 "
 
-replace_cmd="sed"
+replace_cmd="sed -e '/#HACK/,/#hack/d'"
 
 IFS='
 '

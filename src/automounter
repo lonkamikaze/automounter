@@ -134,6 +134,31 @@ iso9660_devs="acd*,cd*"
 
 # Config file.
 config="%%PREFIX%%/etc/automounter.conf"
+
+#HACK
+a="/var/run/automounter.amd"
+l="/var/run/automounter.amd.log"
+directory="/var/run/automounter.amd.mnt"
+map="/var/run/automounter.amd.map"
+static_map="/etc/amd.map"
+devfs="/dev"
+nodes="/var/tmp/automounter.nodes"
+oldnodes="/tmp/automounter.nodes.old"
+probe="/tmp/automounter.probe"
+probed="/tmp/automounter.probed"
+pidfile="/var/run/automounter.amd.pid"
+linkdir="/media"
+mountdir="/var/run/automounter.mnt"
+lock="/var/run/automounter.lock"
+geli_nodes="/var/run/automounter.geli.nodes"
+geli_oldnodes="/tmp/automounter.geli.oldnodes"
+geli_availablekeys="/var/run/automounter.geli.keys"
+geli_images="/var/geli/images"
+geli_keys=".geli/keys"
+config="/usr/local/etc/automounter.conf"
+#hack
+
+# Read config file.
 if [ -e "$config" -a ! -d "$config" ]; then
 	. "$config"
 fi
@@ -1300,8 +1325,8 @@ case "$1" in
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
 		return
 	;;
-	label)
-		# Label updates should only be performed if no update is
+	devd)
+		# Devd updates should only be performed if no update is
 		# running, because they can cause races.
 		shift
 		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
