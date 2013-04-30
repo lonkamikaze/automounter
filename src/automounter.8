@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 16 January, 2011
+.Dd 30 April, 2013
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -299,7 +299,7 @@ However, it is still necessary to restart
 .Xr devd 8
 after installation:
 .Pp
-	/etc/rc.d/devd restart
+	service devd restart
 .Sh ACCESS RIGHTS
 The mount point inherits the access rights of the label device node. This is
 useful for file systems that don't support proper user management like msdosfs.
@@ -378,9 +378,9 @@ blame. A workaround for this bug is described in the
 .Xr automounter.conf 5
 manual page.
 .Sh COMPATIBILITY
-The script has been tested on FreeBSD 8.1-STABLE
+The script has been tested on FreeBSD stable/9-r250045.
 .Sh SEE ALSO
 .Xr amd 8 , Xr automounter.conf 5 , Xr rc 8 , Xr rc.conf 5 , Xr devd.conf 5 ,
-.Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 and Xr umount 8
+.Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 , Xr umount 8 and Xr service 8
 .Sh AUTHOR
 .An Dominic Fandrey Aq kamikaze@bsdforen.de
