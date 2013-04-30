@@ -1,8 +1,0 @@
-This minor release removes all recursive script calls and relies entirely on
-devd to detect changes. It also fixes two obscure and rarely occuring bugs,
-connected to geli key management and broken labels.
-
-- automounter 1.4.3
-
- * Tested on FreeBSD 8.1-PRERELEASE
- Please run 'man 8 automounter' and 'man 5 automounter.conf' for introductions.

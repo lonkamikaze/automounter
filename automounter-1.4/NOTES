@@ -1,7 +1,0 @@
-This major release adds file system probing to automounter! I.e. devices do
-not need to be labeled to become available through automounter.
-
-- automounter 1.4
-
- * Tested on FreeBSD 8.0-STABLE
- Please run 'man 8 automounter' and 'man 5 automounter.conf' for introductions.
