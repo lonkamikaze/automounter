@@ -1,6 +1,10 @@
-automounter-devel ():
-  - Priorize iso9660 detection over label detection, leads to less confusing
-    detection behaviour for optical media
+automounter-1.4.5 (3 May 2013):
+  - Fix devd race caused by new devd behaviour when probing devices on
+    stable/9 that cannot be mounted, causing fork bomb like behaviour
+  - Fix a sleepless loop condition in the geli detacher, which ate a core
+    and acquired the lock at a high frequency
+  - Prioritize iso9660 detection over label detection, leads to less
+    confusing detection behaviour for optical media
   - Apply more groff_mdoc(7) foo to manual pages
 
 automounter-1.4.4 (12 October 2010):
