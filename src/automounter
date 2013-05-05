@@ -60,6 +60,10 @@ probe="%%TMP%%/automounter.probe"
 # blacklisted through blacklist_nodes.
 probed="%%TMP%%/automounter.probed"
 
+# Used to keep a list of devices and their appearance time to screen devd
+# events only occuring due to device probing.
+screen="%%TMP%%/automounter.screen"
+
 # The pid of amd.
 pidfile="%%RUN%%/automounter.amd.pid"
 
@@ -146,6 +150,7 @@ nodes="/var/tmp/automounter.nodes"
 oldnodes="/tmp/automounter.nodes.old"
 probe="/tmp/automounter.probe"
 probed="/tmp/automounter.probed"
+screen="/tmp/automounter.screen"
 pidfile="/var/run/automounter.amd.pid"
 linkdir="/media"
 mountdir="/var/run/automounter.mnt"
@@ -801,6 +806,15 @@ probeDetect() {
 }
 
 #
+# Update the list of devices to screen from devd events, because they are
+# part of this update run.
+#
+updateScreen() {
+	(geomDevices; geomLabels) \
+		| /usr/bin/lockf -k "$screen" /bin/sh -c "/bin/cat > '$screen'"
+}
+
+#
 # Update the list of managed devices.
 #
 # Updates the amd.map, the list of partitions and the mount links, if amd
@@ -813,12 +827,14 @@ update() {
 	local device line partitions label type options
 	local hash owner mode key detector revisit
 	local devices_blacklist nodes_blacklist
-	local rerun
 
 	# Don't do anything if amd is not running.
 	# This prevents automounter from starting too early from devd.
 	/bin/sync
 	test -e "$pidfile" || return $ERR_NOT_STARTED
+
+	# Record the currently present devices for screening devd calls.
+	updateScreen
 
 	# Start building a new map by copying the static one.
 	/bin/cp "$static_map" "$map"
@@ -865,7 +881,6 @@ update() {
 	done
 
 	# Update geli managed mounts.
-	rerun=
 	geliUpdate
 
 	# Finally reload amd map.
@@ -877,21 +892,11 @@ update() {
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
 
-	# Can be set by geliUpdate() to catch new decrypted devices.
-	if [ -n "$rerun" ]; then
-		update
-		return
-	fi
-
 	return 0
 }
 
 #
 # Update geli encrypted providers. Requires the oldnodes file to be intact.
-#
-# @param rerun
-#	Is set if update should be rerun because something was successfully
-#	attached (decrypted)
 #
 geliUpdate() {
 	# Do not run if geli features are not activated.
@@ -998,7 +1003,6 @@ geliUpdate() {
 			&& /sbin/geli attach -p -k "$key" "$device"
 		then
 			# Remember success.
-			rerun=1
 			echo "add encrypted provider: <$name> as <$device>" \
 				"with key from <$label>"
 			echo "$name;$device;$label" >> "$geli_nodes"
@@ -1069,6 +1073,7 @@ stop() {
 	/bin/rm "$pidfile" "$map" "$nodes" \
 		 "$geli_availablekeys" "$geli_nodes" \
 		 2> "$devfs/null"
+	/usr/bin/lockf "$screen"
 
 	return 0
 }
@@ -1311,6 +1316,39 @@ umount() {
 	exec /sbin/umount "$mountdir/$label" 2> "$devfs/null"
 }
 
+#
+# For devd events, screens update calls for the usual timeout period unless
+# a new device appears.
+#
+devd() {
+
+	local devs
+
+	devs="$(geomDevices; geomLabels)"
+	/usr/bin/lockf -k "$screen" /bin/sh -c "
+		# Pass and update, so that only the first one passes
+		pass() {
+			echo '$devs' > '$screen'
+			exit 0
+		}
+
+		# Check age
+		passed=\$((\$(/bin/date +%s) - \$(/usr/bin/stat -f %m -t %s '$screen')))
+		test \$passed -gt $timeout && pass
+
+		screened=\"\$(/bin/cat '$screen')\"
+
+		# Check whether new devices appeared
+		test -n \"\$(echo '$devs' | /usr/bin/grep -vFx \"\$screened\")\" && pass
+
+		# Check whether devices disappeared
+		test -n \"\$(echo \"\$screened\" | /usr/bin/grep -vFx '$devs')\" && pass
+
+		# Do not pass
+		exit 1
+	"
+}
+
 # Ensure the lock is aquired. And run the requested command.
 case "$1" in
 	locked)
@@ -1334,11 +1372,12 @@ case "$1" in
 		return
 	;;
 	devd)
-		# Devd updates should only be performed if no update is
-		# running, because they can cause races.
-		shift
-		/usr/bin/lockf -st 0 "$lock" $0 locked "$@" &
-		return
+		if devd; then
+			shift
+			# Execute in background.
+			/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@" &
+			return
+		fi
 	;;
 	start | update | stop)
 		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
@@ -1351,7 +1390,7 @@ case "$1" in
 		return $status
 	;;
 	*)
-		cat << HERE-DOC
+		/bin/cat << HERE-DOC
 automounter: unknown directive '$1'.
 Usage:	automounter (start | update | list | mlist | stop)
 	automounter list [mounted | labels | keys | encrypted]
