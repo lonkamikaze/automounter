@@ -1,4 +1,4 @@
-automounter-1.4.5 (3 May 2013):
+automounter-1.4.5 (21 May 2013):
   - Fix devd race caused by new devd behaviour when probing devices on
     stable/9 that cannot be mounted, causing fork bomb like behaviour
   - Fix a sleepless loop condition in the geli detacher, which ate a core
