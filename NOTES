@@ -1,5 +1,5 @@
 This minor release fixes a race with devd and a bug in geli detaching that
-causes the detacher to eat a core and block the log.
+causes the detacher to eat a core and block the lock.
 
 The devd configuration was updated, please run the following command
 immediately after completing the installation procedure:
