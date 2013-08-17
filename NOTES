@@ -1,8 +1,5 @@
-This minor release fixes a race with devd and a bug in geli detaching that
-causes the detacher to eat a core and block the lock.
-
-The devd configuration was updated, please run the following command
-immediately after completing the installation procedure:
-
-	service devd restart
+This minor release cleans up a couple of glitches and fixes the amd(8)
+service dependency handling. In case automounter currently appears not
+to be working run:
+	service automounter restart
 
