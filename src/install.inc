@@ -35,6 +35,7 @@ for parameter; {
 : ${devfs=/dev}
 : ${map=/etc/amd.map}
 : ${amd=/usr/sbin/amd}
+: ${amq=/usr/sbin/amq}
 : ${geli_images=$var/geli/images}
 : ${geli_keys=.geli/keys}
 
@@ -48,6 +49,7 @@ replace="
 %%DEVFS%%,$devfs
 %%MAP%%,$map
 %%AMD%%,$amd
+%%AMQ%%,$amq
 %%GELI_IMAGES%%,$geli_images
 %%GELI_KEYS%%,$geli_keys
 "

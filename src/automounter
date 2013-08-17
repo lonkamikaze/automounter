@@ -24,6 +24,8 @@
 version=1.4.5
 
 # AMD parameters
+amd="%%AMD%%"
+amq="%%AMQ%%"
 a="%%RUN%%/automounter.amd"
 c=4
 w=2
@@ -140,6 +142,8 @@ iso9660_devs="acd*,cd*"
 config="%%PREFIX%%/etc/automounter.conf"
 
 #HACK
+amd="/usr/sbin/amd"
+amq="/usr/sbin/amq"
 a="/var/run/automounter.amd"
 l="/var/run/automounter.amd.log"
 directory="/var/run/automounter.amd.mnt"
@@ -887,7 +891,7 @@ update() {
 	until [ -n "$(/bin/cat "$pidfile" 2> "$devfs/null")" ]; do
 		/bin/sleep 0.1
 	done
-	/bin/kill -HUP "$(/bin/cat "$pidfile" 2> "$devfs/null")"
+	$amq -f
 
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
@@ -1028,7 +1032,7 @@ start() {
 
 	if [ ! -e "$pidfile" ]; then
 		/bin/cp "$static_map" "$map"
-		"%%AMD%%" -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
+		$amd -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
 			${l:+-l"$l"} "$directory" "$map" > "$pidfile" &
 	fi
 
@@ -1048,7 +1052,7 @@ stop() {
 	pid="$(/bin/cat "$pidfile" 2> "$devfs/null")"
 	if [ -n "$pid" ]; then
 		/bin/kill "$pid"
-		wait "$pid" 2> "$devfs/null"
+		/bin/pwait "$pid" 2> "$devfs/null"
 	fi
 	
 	# Clean up stale mounts.
@@ -1073,7 +1077,7 @@ stop() {
 	/bin/rm "$pidfile" "$map" "$nodes" \
 		 "$geli_availablekeys" "$geli_nodes" \
 		 2> "$devfs/null"
-	/usr/bin/lockf "$screen"
+	/usr/bin/lockf "$screen" true
 
 	return 0
 }

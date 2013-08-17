@@ -35,7 +35,10 @@ following way: -parameter=value
 		be built upon.
 
 	-amd=/usr/sbin/amd
-		The location of the amd.
+		The location of the automounter daemon.
+
+	-amq=/usr/sbin/amq
+		The location of the automounter query tool.
 
 	-geli_images=/var/geli/images
 		The location for geli images.
