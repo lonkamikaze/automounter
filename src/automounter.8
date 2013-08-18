@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 30 April, 2013
+.Dd 18 August 2013
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -370,6 +370,10 @@ Returned by the mount command if the requested file system cannot be found.
 Returned by the umount command if the file system to unmount is active.
 .It ERR_LIST_LOCKED 5
 Returned if the list command is issued during an ongoing update.
+.It ERR_RPC_FAIL 6
+Returned if the RPC daemon is not available and could not be started.
+.It ERR_AMD_FAIL 7
+Returned if the AMD daemon could not be started.
 .El
 .Sh BUGS/UNEXPECTED BEHAVIOUR
 Fuse based filesystems like ntfs-3g close all openened files when amd tries to
@@ -378,7 +382,7 @@ blame. A workaround for this bug is described in the
 .Xr automounter.conf 5
 manual page.
 .Sh COMPATIBILITY
-The script has been tested on FreeBSD stable/9-r250045.
+The script has been tested on FreeBSD stable/9-r254418.
 .Sh SEE ALSO
 .Xr amd 8 , Xr automounter.conf 5 , Xr rc 8 , Xr rc.conf 5 , Xr devd.conf 5 ,
 .Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 , Xr umount 8 and Xr service 8

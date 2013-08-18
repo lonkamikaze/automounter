@@ -40,6 +40,12 @@ following way: -parameter=value
 	-amq=/usr/sbin/amq
 		The location of the automounter query tool.
 
+	-rpcbind=/usr/sbin/rpcbind
+		The location of the RPC daemon.
+
+	-rpcinfo=/usr/bin/rpcinfo
+		The location of the RPC reporting tool.
+
 	-geli_images=/var/geli/images
 		The location for geli images.
 
