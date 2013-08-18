@@ -9,19 +9,19 @@ automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 
 for parameter; {
 	case "${parameter%%=*}" in
-		-prefix | -var | -run | -tmp | -media | -devfs | -map | -amd | \
-		-geli_images | -geli_keys)
-			value="${parameter#*=}"
-			parameter="${parameter%%=*}"
-			parameter="${parameter#-}"
-			eval "$parameter='$value'"
+	-prefix | -tmp | -var | -run | -vartmp | -media | -devfs | -map | \
+	-amd | -amq | -rpcbind | -rpcinfo | -geli_images | -geli_keys)
+		value="${parameter#*=}"
+		parameter="${parameter%%=*}"
+		parameter="${parameter#-}"
+		eval "$parameter='$value'"
 		;;
-		-nodoc)
-			files="$(echo "$files" | grep -v '%%MAN%%')"
+	-nodoc)
+		files="$(echo "$files" | grep -v '%%MAN%%')"
 		;;
-		*)
-			echo "Unknown parameter '$parameter'." 1>&2
-			return 1
+	*)
+		echo "Unknown parameter '$parameter'." 1>&2
+		return 1
 		;;
 	esac
 }
@@ -36,6 +36,8 @@ for parameter; {
 : ${map=/etc/amd.map}
 : ${amd=/usr/sbin/amd}
 : ${amq=/usr/sbin/amq}
+: ${rpcbind=/usr/sbin/rpcbind}
+: ${rpcinfo=/usr/bin/rpcinfo}
 : ${geli_images=$var/geli/images}
 : ${geli_keys=.geli/keys}
 
@@ -50,6 +52,8 @@ replace="
 %%MAP%%,$map
 %%AMD%%,$amd
 %%AMQ%%,$amq
+%%RPCBIND%%,$rpcbind
+%%RPCINFO%%,$rpcinfo
 %%GELI_IMAGES%%,$geli_images
 %%GELI_KEYS%%,$geli_keys
 "

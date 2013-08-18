@@ -1,7 +1,10 @@
-automounter-1.4.6 (17 August 2013):
+automounter-1.4.6 (18 August 2013):
   - Use amq(8) to interact with amd(8) instead of sending signals
   - Update the rc.d script to handle dependencies like /etc/rc.d/amd does
     on the supported FreeBSD release branches
+  - Start rpcbind(8) during 'automounter start' if not yet running
+  - Add two new return codes ERR_RPC_FAIL and ERR_AMD_FAIL
+  - Use modern English style date headers in manual pages
 
 automounter-1.4.5 (21 May 2013):
   - Fix devd race caused by new devd behaviour when probing devices on

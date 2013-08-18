@@ -36,6 +36,10 @@ map="%%RUN%%/automounter.amd.map"
 # The amd map that the dynamic mounts are appended to.
 static_map="%%MAP%%"
 
+# RPC tools, required for AMD operation
+rpcbind="%%RPCBIND%%"
+rpcinfo="%%RPCINFO%%"
+
 # The location of the devfs.
 devfs="%%DEVFS%%"
 
@@ -149,6 +153,8 @@ l="/var/run/automounter.amd.log"
 directory="/var/run/automounter.amd.mnt"
 map="/var/run/automounter.amd.map"
 static_map="/etc/amd.map"
+rpcbind="/usr/sbin/rpcbind"
+rpcinfo="/usr/bin/rpcinfo"
 devfs="/dev"
 nodes="/var/tmp/automounter.nodes"
 oldnodes="/tmp/automounter.nodes.old"
@@ -175,6 +181,13 @@ fi
 # devfs must not end with /
 devfs="${devfs%/}"
 
+# Freeze the current configuration
+readonly amd amq a c w l directory map static_map rpcbind rpcinfo devfs
+readonly nodes oldnodes probe probed screen pidfile linkdir mountdir lock
+readonly geli geli_nodes geli_oldnodes geli_availablekeys geli_images geli_keys
+readonly timeout detect_glabel detect_iso9660 detect_probe mount_options
+readonly evil_fuse probe_types iso9660_devs config
+
 IFS='
 '
 
@@ -184,6 +197,8 @@ readonly ERR_NOT_STARTED=2
 readonly ERR_MOUNT_FS_MISSING=3
 readonly ERR_UMOUNT_ACTIVE=4
 readonly ERR_LIST_LOCKED=5
+readonly ERR_RPC_FAIL=6
+readonly ERR_AMD_FAIL=7
 
 # Locking error return codes.
 readonly EX_USAGE=64
@@ -363,17 +378,17 @@ geliUnmount() {
 			fi
 		"
 		case $? in
-			0)
-				# The key is back, no more
-				# need to detach.
-				exit 0
+		0)
+			# The key is back, no more
+			# need to detach.
+			exit 0
 			;;
-			2)
-				# Detach succeeded.
-				echo "del encrypted provider:" \
-					"<$name> as <$device>" \
-					"with key from <$label>"
-				break
+		2)
+			# Detach succeeded.
+			echo "del encrypted provider:" \
+				"<$name> as <$device>" \
+				"with key from <$label>"
+			break
 			;;
 		esac
 		/bin/sleep "${w:-1}"
@@ -413,8 +428,8 @@ checkBlacklists() {
 	if [ -n "$devices_blacklist" ]; then
 		eval "
 			case '$device' in
-				$devices_blacklist)
-					return 1
+			$devices_blacklist)
+				return 1
 				;;
 			esac
 		"
@@ -424,8 +439,8 @@ checkBlacklists() {
 	if [ -n "$nodes_blacklist" ]; then
 		eval "
 			case '$label' in
-				$nodes_blacklist)
-					return 2
+			$nodes_blacklist)
+				return 2
 				;;
 			esac
 		"
@@ -706,11 +721,11 @@ iso9660Detect() {
 		# Skip if the device is not in the pattern list.
 		eval "
 			case '$device' in
-				$dev_pattern)
-					# pass
+			$dev_pattern)
+				# pass
 				;;
-				*)
-					continue
+			*)
+				continue
 				;;
 			esac
 		"
@@ -748,10 +763,10 @@ probeDetect() {
 	# Check whether probing based file system discovery has been disabled.
 	test "$detect_probe" != "1" && return 0
 
-	local device label type mount options
+	local device label type mount options types
 
 	# Reformat probe_types.
-	probe_types="$(echo "$probe_types" | /usr/bin/egrep -o '[^,]+')"
+	types="$(echo "$probe_types" | /usr/bin/egrep -o '[^,]+')"
 
 	# Add new mounts.
 	for device in $(geomDevices); do
@@ -761,7 +776,7 @@ probeDetect() {
 		fi
 
 		# Try probing every file system type.
-		for type in $probe_types; do
+		for type in $types; do
 			label="$type/$device"
 			mount="$type"
 			options="$mount_options"
@@ -888,9 +903,6 @@ update() {
 	geliUpdate
 
 	# Finally reload amd map.
-	until [ -n "$(/bin/cat "$pidfile" 2> "$devfs/null")" ]; do
-		/bin/sleep 0.1
-	done
 	$amq -f
 
 	# Clean up.
@@ -1031,9 +1043,17 @@ start() {
 	local pid
 
 	if [ ! -e "$pidfile" ]; then
+		# AMD requires rpcbind
+		if ! $rpcinfo > "$devfs/null"; then
+			echo "automounter: Starting rpcbind ..." 1>&2
+			$rpcbind || return $ERR_RPC_FAIL
+		fi
+
+		# Start amd with a copy of the static map
 		/bin/cp "$static_map" "$map"
 		$amd -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
-			${l:+-l"$l"} "$directory" "$map" > "$pidfile" &
+			${l:+-l"$l"} "$directory" "$map" > "$pidfile" \
+			|| return $ERR_AMD_FAIL
 	fi
 
 	if [ -n "$1" ]; then
@@ -1355,52 +1375,51 @@ devd() {
 
 # Ensure the lock is aquired. And run the requested command.
 case "$1" in
-	locked)
-		case "$2" in
-			start | update | stop | mount | umount)
-				$2 "$3"
-				return $status
-			;;
-		esac
-	;;
-	list | mlist)
-		$1 "$2"
+locked)
+	case "$2" in
+	start | update | stop | mount | umount)
+		$2 "$3"
 		return
+		;;
+	esac
 	;;
-	umount)
-		# Unmounts should not happen during updates.
-		exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
+list | mlist)
+	$1 "$2"
+	return
 	;;
-	mount)
-		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
+umount)
+	# Unmounts should not happen during updates.
+	exec /usr/bin/lockf -st 0 "$lock" $0 locked "$@"
+	;;
+mount)
+	exec /usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
+	;;
+devd)
+	if devd; then
+		shift
+		# Execute in background.
+		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@" &
 		return
+	fi
 	;;
-	devd)
-		if devd; then
-			shift
-			# Execute in background.
-			/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@" &
-			return
-		fi
+start | update | stop)
+	/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
+	status=$?
+	case $status in
+	$EX_USAGE | $EX_SOFTWARE | $EX_OSERR | $EX_CANTCREAT | $EX_TEMPFAIL)
+		echo "automounter: Lock could not be aquired:" "$@" 1>&2
+		;;
+	esac
+	return $status
 	;;
-	start | update | stop)
-		/usr/bin/lockf -st "$timeout" "$lock" $0 locked "$@"
-		status=$?
-		case $status in
-			$EX_USAGE | $EX_SOFTWARE | $EX_OSERR | $EX_CANTCREAT | $EX_TEMPFAIL)
-				echo "automounter: Lock could not be aquired:" "$@" 1>&2
-			;;
-		esac
-		return $status
-	;;
-	*)
-		/bin/cat << HERE-DOC
+*)
+	/bin/cat << HERE-DOC
 automounter: unknown directive '$1'.
 Usage:	automounter (start | update | list | mlist | stop)
 	automounter list [mounted | labels | keys | encrypted]
 	automounter mlist [mounted | llinks | dlinks]
 HERE-DOC
-		return $ERR_CMD_UNKNOWN
+	return $ERR_CMD_UNKNOWN
 	;;
 esac
 
