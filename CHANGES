@@ -1,5 +1,8 @@
-automounter-1.4.7 (28 August 2013):
+automounter-1.4.7 (29 August 2013):
   - Allow configuring additional arguments for tool calls
+  - Add read-only fallback for mounts to support mounting devices with
+    hardware write protection
+  - Fix display of 'automounter list mounted' for labeled devices
 
 automounter-1.4.6 (18 August 2013):
   - Use amq(8) to interact with amd(8) instead of sending signals

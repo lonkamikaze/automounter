@@ -21,7 +21,7 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4.6
+version=1.4.7
 
 # AMD parameters
 amd="%%AMD%%"
@@ -484,7 +484,7 @@ revisitNeeded() {
 	return 1
 }
 
-# This function recors a node, creates the map file entry and calls
+# This function records a node, creates the map file entry and calls
 # createLinks. The idea is to separate this code from the device discovery
 # code in the update() function.
 #
@@ -539,7 +539,7 @@ unmount:=\"$0 umount umount $hash\"
 }
 
 #
-# Make a trial mount in the probe directory. Make sure to run probeUnmount
+# Make a read-only mount in the probe directory. Make sure to run probeUnmount
 # after succeeding.
 #
 # @param 1
@@ -575,7 +575,8 @@ probeMount() {
 	fi
 
 	# Run the mount command.
-	/sbin/mount -t "$mount" -o "$options" "$devfs/$device" "$probe" 2> "$devfs/null"
+	/sbin/mount -t "$mount" -o "$options${options:+,}ro" \
+	            "$devfs/$device" "$probe" 2> "$devfs/null"
 	status=$?
 	if [ $status -ne 0 ]; then
 		/bin/rmdir "$probe"
@@ -1131,12 +1132,15 @@ list() {
 		); {
 			# If the given devices match a line just print
 			# it and we are done. Otherwise look for the label
-			# with a different device, which can happen with
-			# fuse devices.
+			# with a different device.
+			# This is the case for labeled devices, because the
+			# label is used for mounting and for fuse devices,
+			# because fuse creates a new device node for each
+			# device it mounts.
 			device="${line%%;*}"
 			if /usr/bin/grep -qFx "$line" "$nodes"; then
 				echo "mounted: <${line#*;}> from <$device>"
-			elif $(line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"); then
+			elif line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"; then
 				echo "mounted: <${line#*;}> from <${line%%;*}> as <$device>"
 			fi
 		}
@@ -1267,9 +1271,13 @@ mount() {
 				device="$label"
 			fi
 
-			# Give over to the mount command.
-			exec /sbin/mount -t "$mount" -o "$options" \
-				"$devfs/$device" "$mountdir/$label"
+			# Mount the file system, try read-only fallback in
+			# case of failure.
+			/sbin/mount -t "$mount" -o "$options" \
+			            "$devfs/$device" "$mountdir/$label" \
+			|| /sbin/mount -t "$mount" -o "$options${options:+,}ro" \
+			               "$devfs/$device" "$mountdir/$label"
+			return
 		fi
 	done
 	echo "File system not found."
