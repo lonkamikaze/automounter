@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 18 August 2013
+.Dd 28 August 2013
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -70,8 +70,8 @@ This manual page describes how to set up
 How to adjust its behaviour is described in the
 .Xr automounter.conf 5
 manual page.
-.Sh OPTIONS
-The following options are available:
+.Sh COMMANDS
+The following commands are available:
 .Bl -tag -width indent
 .It Ar start
 Starts
@@ -271,11 +271,15 @@ its managed file systems.
 The second advatage is that
 .Nm
 can thus intercept mounts and umounts. This is used to enforce locked mounts
-and umounts umounts as well as preventing unmount attempts to file systems in
+and umounts as well as preventing unmount attempts to file systems in
 use, especially with the fuse hack in place. But it is also used to force
 unmount file systems whose devices are no longer present and issue an update
 call, because the disappearing of the device was previously missed, due to
 mounted file systems being protected from disappearing.
+.Pp
+Finally it is used to silently fall back to read-only mode, which allows
+mounting of devices with hardware write protection like SD cards or lockable
+USB drives.
 .Sh STARTUP
 In order for the dynamic creation and destruction of mountpoints to work,
 it is necessary that
@@ -382,7 +386,7 @@ blame. A workaround for this bug is described in the
 .Xr automounter.conf 5
 manual page.
 .Sh COMPATIBILITY
-The script has been tested on FreeBSD stable/9-r254418.
+The script has been tested on FreeBSD stable/9-r254957.
 .Sh SEE ALSO
 .Xr amd 8 , Xr automounter.conf 5 , Xr rc 8 , Xr rc.conf 5 , Xr devd.conf 5 ,
 .Xr devfs.rules 5 , Xr geli 8 , Xr mount 8 , Xr umount 8 and Xr service 8
