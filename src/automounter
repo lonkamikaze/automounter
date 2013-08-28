@@ -903,7 +903,7 @@ update() {
 	geliUpdate
 
 	# Finally reload amd map.
-	$amq -f
+	eval $amq -f
 
 	# Clean up.
 	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
@@ -1044,16 +1044,16 @@ start() {
 
 	if [ ! -e "$pidfile" ]; then
 		# AMD requires rpcbind
-		if ! $rpcinfo > "$devfs/null"; then
+		if ! eval $rpcinfo > "$devfs/null"; then
 			echo "automounter: Starting rpcbind ..." 1>&2
-			$rpcbind || return $ERR_RPC_FAIL
+			eval $rpcbind || return $ERR_RPC_FAIL
 		fi
 
 		# Start amd with a copy of the static map
 		/bin/cp "$static_map" "$map"
-		$amd -r -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
-			${l:+-l"$l"} "$directory" "$map" > "$pidfile" \
-			|| return $ERR_AMD_FAIL
+		eval $amd -rp -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
+		     ${l:+-l"$l"} "$directory" "$map" > "$pidfile" \
+		|| return $ERR_AMD_FAIL
 	fi
 
 	if [ -n "$1" ]; then
