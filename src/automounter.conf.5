@@ -21,7 +21,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 18 August 2013
+.Dd 28 August 2013
 .Dt AUTOMOUNTER.CONF 5
 .Os
 .Sh NAME
@@ -39,6 +39,11 @@ No checks are performed on these settings, it is the responsibility of the
 system administrator to create a working configuration. For many systems
 the defaults ought to be fine and a configuration file is not required
 at all.
+.Sh TOOL LOCATIONS
+The locations of
+.Xr amd 8 , Xr amq 8 , Xr rpcbind 8 and Xr rpcinfo 8
+can be configured. In addition to pointing to different locations this can be
+used to call the tools with additional arguments.
 .Sh AMD SETTINGS
 The following variables can be used to control the behaviour of
 .Xr amd 8 .
@@ -49,7 +54,11 @@ Unless noted otherweise after changing any of these settings automounter has to
 be restarted. Failing to do so can result in an inconsistent state.
 .Bl -tag -width indent
 .It amd="%%AMD%%"
+The location of the automounter daemon
+.Xr amd 8 .
 .It amq="%%AMQ%%"
+The location of the automounter query tool
+.Xr amq 8 .
 .It a="%%RUN%%/automounter.amd"
 .It c=4
 .It w=2
@@ -294,9 +303,7 @@ The directory on managed file systems to poll for keys.
 .It %%PREFIX%%/etc/automounter.conf.sample
 .El
 .Sh SEE ALSO
-.Xr automounter 8 ,
-.Xr amd 8 ,
-.Xr mount 8 ,
-.Xr geli 8
+.Xr automounter 8 , Xr amd 8 , Xr amq 8 , Xr rpcbind 8 , Xr rpcinfo 8 ,
+.Xr mount 8 , Xr geli 8
 .Sh AUTHOR
 .An Dominic Fandrey Aq kamikaze@bsdforen.de
