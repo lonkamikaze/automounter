@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 28 August 2013
+.Dd 29 August 2013
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -292,7 +292,7 @@ following line in
 .Pp
 To start it without rebooting run the following command:
 .Pp
-	%%PREFIX%%/etc/rc.d/automounter start
+	service automounter start
 .Sh DEVICE DISCOVERY
 As of
 .Nm
@@ -321,7 +321,7 @@ manual page.
 The
 .Nm
 script is able to poll keys for encrypted images and devices from managed media
-(such as a USB stick) and create the necessary device nodes to access these
+(such as a USB drive) and create the necessary device nodes to access these
 images.  Images containing labeled partitions are detected like managed media
 and can even contain keys themselves. Keys and labels will simply be updated
 whenever new ones show up.
