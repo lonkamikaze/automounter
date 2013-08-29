@@ -1,0 +1,4 @@
+By default automounter now directs the majority of its output to syslogd(8)
+and stderr(4) via logger(1). To continue receiving output on the first
+console please restart devd(8):
+	service devd restart

@@ -21,8 +21,6 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-version=1.4.7
-
 # AMD parameters
 amd="%%AMD%%"
 amq="%%AMQ%%"
@@ -36,9 +34,12 @@ map="%%RUN%%/automounter.amd.map"
 # The amd map that the dynamic mounts are appended to.
 static_map="%%MAP%%"
 
-# RPC tools, required for AMD operation
+# RPC tools, required for AMD operation.
 rpcbind="%%RPCBIND%%"
 rpcinfo="%%RPCINFO%%"
+
+# Logger command.
+logger="%%LOGGER%%"
 
 # The location of the devfs.
 devfs="%%DEVFS%%"
@@ -155,6 +156,7 @@ map="/var/run/automounter.amd.map"
 static_map="/etc/amd.map"
 rpcbind="/usr/sbin/rpcbind"
 rpcinfo="/usr/bin/rpcinfo"
+logger="/usr/bin/logger -st automounter"
 devfs="/dev"
 nodes="/var/tmp/automounter.nodes"
 oldnodes="/tmp/automounter.nodes.old"
@@ -182,7 +184,7 @@ fi
 devfs="${devfs%/}"
 
 # Freeze the current configuration
-readonly amd amq a c w l directory map static_map rpcbind rpcinfo devfs
+readonly amd amq a c w l directory map static_map rpcbind rpcinfo logger devfs
 readonly nodes oldnodes probe probed screen pidfile linkdir mountdir lock
 readonly geli geli_nodes geli_oldnodes geli_availablekeys geli_images geli_keys
 readonly timeout detect_glabel detect_iso9660 detect_probe mount_options
@@ -278,7 +280,7 @@ rmLinks() {
 		/sbin/umount -f "$mountdir/$label" > "$devfs/null" 2>&1
 
 		# Remove the stale label.
-		echo "del label: <$label> from <$device>"
+		echo "update: remove <$label> [$device]" | eval $logger
 		/bin/rm "$linkdir/$label"
 		/bin/rm "$linkdir/${devfs##*/}/$device.$type"
 		/bin/rm "$linkdir/${devfs##*/}/$device"
@@ -308,7 +310,7 @@ createLinks() {
 		shift 2
 		
 		# Create mount hooks.
-		echo "add label: <$label> from <$device>"
+		echo "update: add <$label> [$device]" | eval $logger
 		/bin/mkdir -p "$mountdir/$label"
 
 		# Inherit mount node owner from device.
@@ -385,9 +387,8 @@ geliUnmount() {
 			;;
 		2)
 			# Detach succeeded.
-			echo "del encrypted provider:" \
-				"<$name> as <$device>" \
-				"with key from <$label>"
+			echo "geli: remove provider <$name> [$device]" \
+				"with key from <$label>" | eval $logger
 			break
 			;;
 		esac
@@ -933,7 +934,7 @@ geliUpdate() {
 
 		# Forget keys belonging to this line.
 		for key in $(echo "$keys" | /usr/bin/grep -E "^$label;"); do
-			echo "del key: <${key##*;}> from <$label>"
+			echo "geli: remove key <${key##*;}> from <$label>" | eval $logger
 		done
 		keys="$(echo "$keys" | /usr/bin/grep -Ev "^$label;")"
 	done
@@ -950,7 +951,7 @@ geliUpdate() {
 			for key in $(
 				/bin/ls "$probe/$geli_keys/" 2> "$devfs/null"
 			); do
-				echo "add key: <$key> from <$label>"
+				echo "geli: add key <$key> from <$label>" | eval $logger
 				echo "$label;$key" >> "$geli_availablekeys"
 			done
 
@@ -1020,8 +1021,9 @@ geliUpdate() {
 			&& /sbin/geli attach -p -k "$key" "$device"
 		then
 			# Remember success.
-			echo "add encrypted provider: <$name> as <$device>" \
-				"with key from <$label>"
+			echo "geli: add provider" \
+			     "<$name> [$device] with key from <$label>" \
+			     | eval $logger
 			echo "$name;$device;$label" >> "$geli_nodes"
 		else
 			# Unsuccessful, clean up memory disk.
@@ -1046,8 +1048,12 @@ start() {
 	if [ ! -e "$pidfile" ]; then
 		# AMD requires rpcbind
 		if ! eval $rpcinfo > "$devfs/null"; then
-			echo "automounter: Starting rpcbind ..." 1>&2
-			eval $rpcbind || return $ERR_RPC_FAIL
+			eval $logger start: Starting rpcbind ...
+			if ! eval $rpcbind; then
+				eval $logger start: failed.
+				return $ERR_RPC_FAIL
+			fi
+			eval $logger start: success.
 		fi
 
 		# Start amd with a copy of the static map
@@ -1139,16 +1145,20 @@ list() {
 			# device it mounts.
 			device="${line%%;*}"
 			if /usr/bin/grep -qFx "$line" "$nodes"; then
-				echo "mounted: <${line#*;}> from <$device>"
+				echo "mounted: <${line#*;}> [$device]"
 			elif line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"; then
-				echo "mounted: <${line#*;}> from <${line%%;*}> as <$device>"
+				if [ "${line#*;}" != "$device" ]; then
+					echo "mounted: <${line#*;}> [${line%%;*}] as [$device]"
+				else
+					echo "mounted: <${line#*;}> [${line%%;*}]"
+				fi
 			fi
 		}
 	fi
 
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "labels" ]; then
-		/usr/bin/sed -E 's/([^;]*);(.*)/label: <\2> from <\1>/1' \
+		/usr/bin/sed -E 's/([^;]*);(.*)/label: <\2> [\1]/1' \
 			"$nodes" 2> "$devfs/null"
 	fi
 
@@ -1160,7 +1170,7 @@ list() {
 
 	# List the encrypted providers and their status.
 	if [ -z "$1" -o "$1" = "encrypted" -o "$1" = "images" ]; then
-		/usr/bin/sed -E 's/(.*);(.*);(.*)/encrypted provider: <\1> as <\2> with key from <\3>/1' \
+		/usr/bin/sed -E 's/(.*);(.*);(.*)/encrypted provider: <\1> [\2] with key from <\3>/1' \
 			"$geli_nodes" 2> "$devfs/null"
 		for image in $(/bin/ls "$geli_images/" 2> "$devfs/null"); do
 			/usr/bin/grep -qx "$image;.*" "$geli_nodes" \
@@ -1170,7 +1180,7 @@ list() {
 			else
 				device="$(/usr/bin/readlink \
 					"$geli_images/$image")"
-				echo "encrypted provider: <$image> as <$device>"
+				echo "encrypted provider: <$image> [$device]"
 			fi
 		done
 	fi
@@ -1280,7 +1290,7 @@ mount() {
 			return
 		fi
 	done
-	echo "File system not found."
+	eval $logger mount: Requested file system not found.
 	return $ERR_MOUNT_FS_MISSING
 }
 
@@ -1295,7 +1305,7 @@ mount() {
 #	otherwise "exec /sbin/umount" is called.
 #
 umount() {
-	local label device labels
+	local label device labels status
 
 	# Find the label for the current hash.
 	label=
@@ -1330,18 +1340,20 @@ umount() {
 		fi
 	fi
 
-	# Don't attempt umounts for active file systems.
-	if /usr/bin/fstat | /usr/bin/grep -F " $mountdir/$label " > "$devfs/null"; then
-		return $ERR_UMOUNT_ACTIVE
-	fi
-
 	# If the device is missing (i.e. it was removed while being mounted),
 	# force umount.
 	if [ ! -e "$devfs/$device" ]; then
-		echo "automounter: Force unmounting missing <$label> from <$device>" 1>&2
+		echo  "umount: force umount missing <$label> [$device]" | eval $logger
 		# Schedule an update.
-		$0 update &
-		exec /sbin/umount -f "$mountdir/$label" 2> "$devfs/null"
+		/sbin/umount -f "$mountdir/$label" 2> "$devfs/null"
+		status=$?
+		update
+		return $status
+	fi
+
+	# Don't attempt umounts for active file systems.
+	if /usr/bin/fstat | /usr/bin/grep -F " $mountdir/$label " > "$devfs/null"; then
+		return $ERR_UMOUNT_ACTIVE
 	fi
 
 	# Give over to the system unmount command.

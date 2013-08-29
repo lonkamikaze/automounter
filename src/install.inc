@@ -9,8 +9,9 @@ automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 
 for parameter; {
 	case "${parameter%%=*}" in
-	-prefix | -tmp | -var | -run | -vartmp | -media | -devfs | -map | \
-	-amd | -amq | -rpcbind | -rpcinfo | -geli_images | -geli_keys)
+	-prefix | -tmp | -var | -run | -vartmp | -media | -devfs | \
+	-map | -amd | -amq | -rpcbind | -rpcinfo | -logger | \
+	-geli_images | -geli_keys)
 		value="${parameter#*=}"
 		parameter="${parameter%%=*}"
 		parameter="${parameter#-}"
@@ -38,6 +39,7 @@ for parameter; {
 : ${amq=/usr/sbin/amq}
 : ${rpcbind=/usr/sbin/rpcbind}
 : ${rpcinfo=/usr/bin/rpcinfo}
+: ${logger=/usr/bin/logger -st automounter}
 : ${geli_images=$var/geli/images}
 : ${geli_keys=.geli/keys}
 
@@ -54,6 +56,7 @@ replace="
 %%AMQ%%,$amq
 %%RPCBIND%%,$rpcbind
 %%RPCINFO%%,$rpcinfo
+%%LOGGER%%,$logger
 %%GELI_IMAGES%%,$geli_images
 %%GELI_KEYS%%,$geli_keys
 "
