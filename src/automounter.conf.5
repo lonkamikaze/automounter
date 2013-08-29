@@ -41,7 +41,7 @@ the defaults ought to be fine and a configuration file is not required
 at all.
 .Sh TOOL LOCATIONS
 The locations of
-.Xr amd 8 , Xr amq 8 , Xr rpcbind 8 and Xr rpcinfo 8
+.Xr amd 8 , Xr amq 8 , Xr rpcbind 8 , Xr rpcinfo 8 and Xr logger 1
 can be configured. In addition to pointing to different locations this can be
 used to call the tools with additional arguments.
 .Sh AMD SETTINGS
@@ -181,6 +181,16 @@ A lock file that is used to prevent clashes between several instances of
 e.g. when there are several USB events at once.
 .Pp
 This takes immediate effect.
+.It logger="%%LOGGER%%"
+The
+.Xr logger 1
+command, reports messages to
+.Xr syslogd 8 .
+This can be replaced with an arbitrary command that accepts messages as
+arguments and from
+.Xr stdin 4 .
+.Pp
+Changes take immediate effect.
 .It mount_options=rw,noatime,noexec
 These are the default options given to mount when mounting a file system.
 .Pp
@@ -304,6 +314,6 @@ The directory on managed file systems to poll for keys.
 .El
 .Sh SEE ALSO
 .Xr automounter 8 , Xr amd 8 , Xr amq 8 , Xr rpcbind 8 , Xr rpcinfo 8 ,
-.Xr mount 8 , Xr geli 8
+.Xr mount 8 , Xr logger 1 , Xr syslogd 8 , Xr geli 8
 .Sh AUTHOR
 .An Dominic Fandrey Aq kamikaze@bsdforen.de

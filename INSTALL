@@ -46,6 +46,10 @@ following way: -parameter=value
 	-rpcinfo=/usr/bin/rpcinfo
 		The location of the RPC reporting tool.
 
+	-logger="/usr/bin/logger -st automounter"
+		The logger(1) call, messages must be read from arguments and
+		stdin.
+
 	-geli_images=/var/geli/images
 		The location for geli images.
 
