@@ -17,7 +17,7 @@ name="automounter"
 rcvar=`set_rcvar`
 
 pidfile="%%RUN%%/automounter.amd.pid"
-procname="%%AMD%%"
+procname="%%AMD:1%%"
 command="%%PREFIX%%/sbin/$name"
 extra_commands="update"
 
