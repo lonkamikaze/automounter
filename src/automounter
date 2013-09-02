@@ -1332,6 +1332,16 @@ umount() {
 		fi
 	done
 
+	# If the label is unknown, claim the device was unmounted.
+	if [ -z "$label" ]; then
+		return 0
+	fi
+
+	# If the label is not mounted, claim a successful unmount.
+	if ! /sbin/mount | /usr/bin/grep -qF "$(realpath $mountdir)/$label ("; then
+		return 0
+	fi
+
 	# Find out if we are a fuse file system and use dirty bug workaround.
 	# This will lead to unexpected results with more than one fuse based
 	# file system around. Fuse based file systems will only get unmounted
@@ -1425,13 +1435,14 @@ devd() {
 monitorFormats() {
 	local wd wl
 
+	/usr/bin/tput cl
+
 	co=$(/usr/bin/tput co)
 	li=$(/usr/bin/tput li)
 
 	wd=$(((co - 12) / 2))
 	wl=$((co - 12 - wd))
 	hformat="%-$wl.${wl}s %-$wd.${wd}s %4.4s %4.4s\r"
-	/usr/bin/tput cl
 
 	lformat="%-$wl.${wl}s %-$wd.${wd}s %3.3s  %3.3s\r"
 	clrformat="%$((co - 1))s\r"
@@ -1447,18 +1458,18 @@ monitorFormats() {
 # @note
 #	Requires an initial call of monitorIdleInit() to start the first
 #	sleep cycle
-# @note
-#	All traps should start with "set +T" if this function is used
 # @param idleCycle
 #	The idle time
 # @param idleSleepPID
 #	The PID of the last sleep call
 #
 monitorIdle() {
-	set -T
-	wait $idleSleepPID
-	set +T
-	/bin/sleep $idleCycle &
+	wait $idleSleepPID >&3 2>&3
+	(
+		set -T
+		trap 'kill $(jobs -p)' winch info
+		/bin/sleep $idleCycle
+	) >&- 2>&- &
 	idleSleepPID=$!
 }
 
@@ -1477,7 +1488,11 @@ monitorIdleInit() {
 	if ! echo $idleCycle | /usr/bin/grep -Eqx '([0-9]+\.?[0-9]*|\.[0-9]+)'; then
 		return 1
 	fi
-	/bin/sleep $idleCycle &
+	(
+		set -T
+		trap 'kill $(jobs -p)' winch info
+		/bin/sleep $idleCycle
+	) 1>&3 2>&3 &
 	idleSleepPID=$!
 }
 
@@ -1612,11 +1627,17 @@ monitorHeading() {
 #
 # The file descriptor 3 is set to $devfs/null.
 #
+# The terminal size update trap sets winch=1.
+#
+# @param winch
+#	Is set to 1 by the winch trap to announce that a window change
+#	happened
+#
 monitorSetup() {
 	exec 3> "$devfs/null"
-	trap "set +T; monitorFormats" winch info
-	trap "set +T; exit 0" int term
-	trap "/usr/bin/tput ve; /usr/bin/tput cl" EXIT
+	trap 'monitorFormats; winch=1' winch info
+	trap 'exit 0' int term
+	trap '/usr/bin/tput ve; /usr/bin/tput cl' EXIT
 	/usr/bin/tput vi
 }
 
@@ -1637,6 +1658,8 @@ monitorSetup() {
 #	The (optional) update cycle time
 #
 monitor() {
+	# For monitorSetup
+	local winch
 	# Populated by monitorFormats()
 	local co li lformat hformat clrformat
 	# For monitorIdle()
@@ -1664,10 +1687,13 @@ monitor() {
 	local gnodes image encrypted
 
 	while true; do
+		# Reset the window change trap notify.
+		winch=
+
 		# Get the number of encrypted images/devices
 		encrypted=$(($(/bin/ls $geli_images 2>&3 | /usr/bin/wc -l)))
 
-		# Draw the
+		# Draw the heading.
 		monitorHeading ${list:-0} ${mounts:-0} $encrypted ${keys:-0}
 
 		test -e "$lock" && continue
@@ -1736,6 +1762,10 @@ monitor() {
 
 		# Overwrite trailing rows.
 		monitorListTail
+
+		# Skip idle interval if a window change trap was executed.
+		test -n "$winch" && continue
+
 		# Sleep.
 		monitorIdle
 	done

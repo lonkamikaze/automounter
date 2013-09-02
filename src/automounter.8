@@ -24,7 +24,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 29 August 2013
+.Dd 2 September 2013
 .Dt AUTOMOUNTER 8
 .Os
 .Sh NAME
@@ -32,13 +32,16 @@
 .Nd Dynamically configure amd for existing devices.
 .Sh SYNOPSIS
 .Nm
-.Pq Ar start | Ar update | Ar list | Ar mlist | Ar stop
+.Pq Ar start | Ar update | Ar list | Ar mlist | Ar monitor | Ar stop
 .Nm
 .Ar list
 .Op Ar mounted | Ar labels | Ar keys | Ar encrypted
 .Nm
 .Ar mlist
 .Op Ar mounted | Ar llinks | Ar dlinks
+.Nm
+.Ar monitor
+.Op Ar interval
 .Sh DESCRIPTION
 The
 .Nm
@@ -46,7 +49,7 @@ script dynamically builds a map file for
 .Xr amd 8 .
 It is meant to be started by the
 .Xr rc 8
-system and trigerred by
+system and triggered by
 .Xr devd 8
 when devices appear or disappear.
 .Pp
@@ -92,8 +95,8 @@ List currently available labels.
 .It Ar list keys
 Lists the keys that were found on the managed media.
 .It Ar list encrypted
-Lists the images and devices that are available. If attached, the media that
-contains the key will also be listed.
+Lists the encrypted images and devices that are available. If attached, the
+media that contains the key will also be listed.
 .It Ar mlist
 List data in a machine readable form as newline separated absolute path names.
 .It Ar mlist mounted
@@ -102,6 +105,13 @@ List the paths of mounted file systems.
 List label named links to file systems.
 .It Ar mlist dlinks
 List device named links to file systems.
+.It Ar monitor
+Provides a
+.Xr top 1
+like display of the available labels, keys and encrypted images and devices.
+.It Ar monitor Ar interval
+Refresh the monitor display at the given interval in seconds, defaults to two
+seconds if omitted.
 .It Ar stop
 Unmount everything, stop
 .Xr amd 8
@@ -111,7 +121,7 @@ and clean everything up.
 Unsupported parameters will cause printing of supported parameters.
 .Sh NOTES
 Automounter is made for the sake of comfort. Even though it reduces the
-probabilty of panics, the user is still oblieged to run
+probability of panics, the user is still obliged to run
 .Xr mount 8
 to make sure a device is not mounted, before unplugging it.
 .Pp
@@ -133,7 +143,7 @@ is not a daemon, instead it relies on
 .Xr amd 8
 to perform the daemonic task of dynamically mounting file systems.
 .Pp
-The purpuse of
+The purpose of
 .Nm
 is to discover mountable file systems and create an
 .Xr amd 8
@@ -195,7 +205,7 @@ The probe detector takes the remaining geom providers reported by the
 .Xr gstat 8
 tool and simply tries to mount them as different file system types until
 it succeeds or runs out of file system types. Successfully mounted
-devices are unmonted and setup with
+devices are unmounted and setup with
 .Fn writeNode .
 .Pp
 Afterwards the mount detector is called again to catch mounts that
@@ -268,7 +278,7 @@ parameters. To permit human readable mount directories, the mount and umount
 commands are called with a hash, which automounter than interprets as one of
 its managed file systems.
 .Pp
-The second advatage is that
+The second advantage is that
 .Nm
 can thus intercept mounts and umounts. This is used to enforce locked mounts
 and umounts as well as preventing unmount attempts to file systems in
@@ -281,7 +291,7 @@ Finally it is used to silently fall back to read-only mode, which allows
 mounting of devices with hardware write protection like SD cards or lockable
 USB drives.
 .Sh STARTUP
-In order for the dynamic creation and destruction of mountpoints to work,
+In order for the dynamic creation and destruction of mount points to work,
 it is necessary that
 .Nm
 is started first. The recommended way to achieve this is by setting the
@@ -308,7 +318,7 @@ after installation:
 The mount point inherits the access rights of the label device node. This is
 useful for file systems that don't support proper user management like msdosfs.
 If any right is present for the owner, group or others the executable flag is
-added to ensure that cding into the file system is possible.
+added to ensure that cd'ing into the file system is possible.
 .Pp
 If the label device node is not found, e.g. because the label is empty, the
 regular device node will be used instead.
@@ -380,7 +390,7 @@ Returned if the RPC daemon is not available and could not be started.
 Returned if the AMD daemon could not be started.
 .El
 .Sh BUGS/UNEXPECTED BEHAVIOUR
-Fuse based filesystems like ntfs-3g close all openened files when amd tries to
+Fuse based file systems like ntfs-3g close all opened files when amd tries to
 unmount them. This is a bug in fuse and neither automounter nor amd are to
 blame. A workaround for this bug is described in the
 .Xr automounter.conf 5

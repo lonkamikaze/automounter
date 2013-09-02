@@ -21,7 +21,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd 28 August 2013
+.Dd 2 September 2013
 .Dt AUTOMOUNTER.CONF 5
 .Os
 .Sh NAME
@@ -50,7 +50,7 @@ The following variables can be used to control the behaviour of
 Please refer to that manual page for descriptions. The following will only
 list the defaults unless the variables are further processed.
 .Pp
-Unless noted otherweise after changing any of these settings automounter has to
+Unless noted otherwise after changing any of these settings automounter has to
 be restarted. Failing to do so can result in an inconsistent state.
 .Bl -tag -width indent
 .It amd="%%AMD%%"
@@ -241,7 +241,7 @@ A comma separated list of file system types to automatically probe for.
 .Pp
 Changing probe_types takes effect with the next update call.
 .It timeout=10
-The time out for aquiring the lock. If the time out passes without gaining
+The time out for acquiring the lock. If the time out passes without gaining
 the lock the instance of
 .Xr automounter 8
 is skipped.
