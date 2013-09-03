@@ -1604,7 +1604,7 @@ monitorListTail() {
 monitorHeading() {
 	local header amdPID state
 	# Get the amd and automounter states.
-	amdPID=$(/bin/cat "$pidfile" 2>3)
+	amdPID=$(/bin/cat "$pidfile" 2>&3)
 	state=up
 	test -z "$amdPID" && state=down
 	test -e "$lock" && state=LOCKED
