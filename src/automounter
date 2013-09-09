@@ -1669,15 +1669,15 @@ monitor() {
 	# For monitorListTail()
 	local tailLine
 
-	idleCycle=${1:-2}
+	# Initialise traps, cursor and the file descriptor 3 for litter.
+	monitorSetup
 
+	idleCycle=${1:-2}
 	if ! monitorIdleInit; then
 		echo "The cycle time $idleCycle is not a valid number of seconds." 1>&2
 		exit 1
 	fi
 
-	# Initialise traps, cursor and the file descriptor 3 for litter.
-	monitorSetup
 	# Initialise list formatting strings.
 	monitorFormats
 
