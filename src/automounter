@@ -209,6 +209,9 @@ readonly EX_OSERR=71
 readonly EX_CANTCREAT=73
 readonly EX_TEMPFAIL=75
 
+# Open a file descriptor to the null devices.
+exec 3> "$devfs/null"
+
 #
 # Produces a list of geom device nodes on stdout.
 #
@@ -282,17 +285,17 @@ rmLinks() {
 		shift 2
 
 		# Make sure this device is not mounted.
-		/sbin/umount -f "$(realpath $mountdir)/$label" > "$devfs/null" 2>&1
+		/sbin/umount -f "$(realpath $mountdir)/$label" >&3 2>&3
 
 		# Remove the stale label.
 		echo "$mode: remove <$label> [$device]" | eval $logger
 		/bin/rm "$linkdir/$label"
 		/bin/rm "$linkdir/${devfs##*/}/$device.$type"
 		/bin/rm "$linkdir/${devfs##*/}/$device"
-		/bin/rmdir "$linkdir/${devfs##*/}" 2> "$devfs/null"
-		/bin/rmdir "$linkdir/$type" 2> "$devfs/null"
+		/bin/rmdir "$linkdir/${devfs##*/}" 2>&3
+		/bin/rmdir "$linkdir/$type" 2>&3
 		/bin/rmdir "$mountdir/$label"
-		/bin/rmdir "$mountdir/$type" 2> "$devfs/null"
+		/bin/rmdir "$mountdir/$type" 2>&3
 	done
 }
 
@@ -320,21 +323,17 @@ createLinks() {
 
 		# Inherit mount node owner from device.
 		/usr/sbin/chown "$(
-			/usr/bin/stat -f %u:%g "$devfs/$label" 2> "$devfs/null" \
-				|| /usr/bin/stat -f %u:%g "$devfs/$device"
+			/usr/bin/stat -f %u:%g "$devfs/$label" 2>&3 \
+			|| /usr/bin/stat -f %u:%g "$devfs/$device"
 		)" "$mountdir/$label"
 
 		# Inherit permissions from device. Add the executable
 		# bit if read or write are permitted.
 		/bin/chmod "$(
 			(
-				/usr/bin/stat -f %p "$devfs/$label" \
-				2> "$devfs/null" \
-					|| /usr/bin/stat -f %p "$devfs/$device"
-			) | /usr/bin/sed -e 's/.//1' \
-				-e 's/2/3/g' \
-				-e 's/4/5/g' \
-				-e 's/6/7/g'
+				/usr/bin/stat -f 0%Lp "$devfs/$label" 2>&3 \
+				|| /usr/bin/stat -f 0%Lp "$devfs/$device"
+			) | /usr/bin/tr '246' '357'
 		)" "$mountdir/$label"
 
 		# Create the links that invoke amd.
@@ -490,6 +489,7 @@ revisitNeeded() {
 	return 1
 }
 
+#
 # This function records a node, creates the map file entry and calls
 # createLinks. The idea is to separate this code from the device discovery
 # code in the update() function.
@@ -582,7 +582,7 @@ probeMount() {
 
 	# Run the mount command.
 	/sbin/mount -t "$mount" -o "$options${options:+,}ro" \
-	            "$devfs/$device" "$probe" 2> "$devfs/null"
+	            "$devfs/$device" "$probe" 2>&3
 	status=$?
 	if [ $status -ne 0 ]; then
 		/bin/rmdir "$probe"
@@ -594,7 +594,7 @@ probeMount() {
 # Force unmount a probe mount.
 #
 probeUnmount() {
-	/sbin/umount -f "$probe" 2> "$devfs/null"
+	/sbin/umount -f "$probe" 2>&3
 	/bin/rmdir "$probe"
 }
 
@@ -913,7 +913,7 @@ update() {
 	eval $amq -f
 
 	# Clean up.
-	/bin/rm "$oldnodes" "$probed" 2> "$devfs/null"
+	/bin/rm "$oldnodes" "$probed" 2>&3
 
 	return 0
 }
@@ -929,7 +929,7 @@ geliUpdate() {
 
 	# Clean up keys from stale mounts.
 	/usr/bin/touch "$oldnodes"
-	keys="$(/bin/cat "$geli_availablekeys" 2> "$devfs/null")"
+	keys="$(/bin/cat "$geli_availablekeys" 2>&3)"
 	oldkeys="$keys"
 	for line in $(/bin/cat "$oldnodes"); do
 		# Skip still present lines.
@@ -953,9 +953,7 @@ geliUpdate() {
 		device="${line%%;*}"
 
 		if probeMount "${label%%/*}" "$device"; then
-			for key in $(
-				/bin/ls "$probe/$geli_keys/" 2> "$devfs/null"
-			); do
+			for key in $(/bin/ls "$probe/$geli_keys/" 2>&3); do
 				echo "geli: add key <$key> from <$label>" | eval $logger
 				echo "$label;$key" >> "$geli_availablekeys"
 			done
@@ -1052,7 +1050,7 @@ start() {
 
 	if [ ! -e "$pidfile" ]; then
 		# AMD requires rpcbind
-		if ! eval $rpcinfo > "$devfs/null"; then
+		if ! eval $rpcinfo >&3; then
 			eval $logger start: Starting rpcbind ...
 			if ! eval $rpcbind; then
 				eval $logger start: failed.
@@ -1085,16 +1083,16 @@ start() {
 stop() {
 	local pid type label line device
 
-	pid="$(/bin/cat "$pidfile" 2> "$devfs/null")"
+	pid="$(/bin/cat "$pidfile" 2>&3)"
 	if [ -n "$pid" ]; then
 		eval $logger stop: Stopping amd ...
 		/bin/kill "$pid"
-		/bin/pwait "$pid" 2> "$devfs/null"
+		/bin/pwait "$pid" 2>&3
 		eval $logger stop: done.
 	fi
 	
 	# Clean up stale mounts.
-	for line in $(/bin/cat "$nodes" 2> "$devfs/null"); do
+	for line in $(/bin/cat "$nodes" 2>&3); do
 		label="${line##*;}"
 		device="${line%%;*}"
 
@@ -1102,7 +1100,7 @@ stop() {
 	done
 
 	# Clean up stale geli nodes.
-	for line in $(/bin/cat "$geli_nodes" 2> "$devfs/null"); do
+	for line in $(/bin/cat "$geli_nodes" 2>&3); do
 		device="${line#*;}"
 		device="${device%;*}"
 
@@ -1111,10 +1109,9 @@ stop() {
 	done
 
 	# Clean up temporary folders.
-	/bin/rmdir "$a" "$directory" "$mountdir" 2> "$devfs/null"
+	/bin/rmdir "$a" "$directory" "$mountdir" 2>&3
 	/bin/rm "$pidfile" "$map" "$nodes" \
-		 "$geli_availablekeys" "$geli_nodes" \
-		 2> "$devfs/null"
+		 "$geli_availablekeys" "$geli_nodes" 2>&3
 	/usr/bin/lockf "$screen" true
 
 	return 0
@@ -1170,22 +1167,22 @@ list() {
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "labels" ]; then
 		/usr/bin/sed -E 's/([^;]*);(.*)/label: <\2> [\1]/1' \
-			"$nodes" 2> "$devfs/null"
+			"$nodes" 2>&3
 	fi
 
 	# List the keys that have been found on mounted devices.
 	if [ -z "$1" -o "$1" = "keys" ]; then
 		/usr/bin/sed -E 's/(.*);(.*)/key: <\2> from <\1>/1' \
-			"$geli_availablekeys" 2> "$devfs/null"
+			"$geli_availablekeys" 2>&3
 	fi
 
 	# List the encrypted providers and their status.
 	if [ -z "$1" -o "$1" = "encrypted" -o "$1" = "images" ]; then
 		/usr/bin/sed -E 's/(.*);(.*);(.*)/encrypted provider: <\1> [\2] with key from <\3>/1' \
-			"$geli_nodes" 2> "$devfs/null"
-		for image in $(/bin/ls "$geli_images/" 2> "$devfs/null"); do
-			/usr/bin/grep -qx "$image;.*" "$geli_nodes" \
-				2> "$devfs/null" && continue
+			"$geli_nodes" 2>&3
+		for image in $(/bin/ls "$geli_images/" 2>&3); do
+			/usr/bin/grep -qx "$image;.*" "$geli_nodes" 2>&3 \
+			&& continue
 			if [ -e "$geli_images/$image" ]; then
 				echo "encrypted provider: <$image>"
 			else
@@ -1238,12 +1235,12 @@ mlist() {
 
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "llinks" ]; then
-		/usr/bin/sed "s,[^;]*;,$linkdir/," "$nodes" 2> "$devfs/null"
+		/usr/bin/sed "s,[^;]*;,$linkdir/," "$nodes" 2>&3
 	fi
 
 	# Print the devices that are available for mounting.
 	if [ -z "$1" -o "$1" = "dlinks" ]; then
-		/usr/bin/sed -E "s,([^;]*);([^/]*).*,$linkdir/${devfs##*/}/\1\\$IFS$linkdir/${devfs##*/}/\1.\2," "$nodes" 2> "$devfs/null"
+		/usr/bin/sed -E "s,([^;]*);([^/]*).*,$linkdir/${devfs##*/}/\1\\$IFS$linkdir/${devfs##*/}/\1.\2," "$nodes" 2>&3
 	fi
 
 	return 0
@@ -1366,19 +1363,19 @@ umount() {
 	if [ ! -e "$devfs/$device" ]; then
 		echo  "umount: force umount missing <$label> [$device]" | eval $logger
 		# Schedule an update.
-		/sbin/umount -f "$(realpath $mountdir)/$label" 2> "$devfs/null"
+		/sbin/umount -f "$(realpath $mountdir)/$label" 2>&3
 		status=$?
 		update
 		return $status
 	fi
 
 	# Don't attempt umounts for active file systems.
-	if /usr/bin/fstat | /usr/bin/grep -F " $(realpath $mountdir)/$label " > "$devfs/null"; then
+	if /usr/bin/fstat | /usr/bin/grep -qF " $(realpath $mountdir)/$label "; then
 		return $ERR_UMOUNT_ACTIVE
 	fi
 
 	# Give over to the system unmount command.
-	exec /sbin/umount "$(realpath $mountdir)/$label" 2> "$devfs/null"
+	exec /sbin/umount "$(realpath $mountdir)/$label" 2>&3
 }
 
 #
@@ -1625,8 +1622,6 @@ monitorHeading() {
 #
 # Sets up file descriptors, traps and the terminal cursor for operation.
 #
-# The file descriptor 3 is set to $devfs/null.
-#
 # The terminal size update trap sets winch=1.
 #
 # @param winch
@@ -1634,7 +1629,6 @@ monitorHeading() {
 #	happened
 #
 monitorSetup() {
-	exec 3> "$devfs/null"
 	trap 'monitorFormats; winch=1' winch info
 	trap 'exit 0' int term
 	trap '/usr/bin/tput ve; /usr/bin/tput cl' EXIT
@@ -1810,9 +1804,11 @@ start | update | stop)
 	esac
 	return $status
 	;;
-*)
+?*)
+	echo "automounter: unknown directive '$1'." 1>&2
+	;&
+'')
 	/bin/cat << HERE-DOC
-automounter: unknown directive '$1'.
 Usage:	automounter (start | update | list | mlist | monitor | stop)
 	automounter list [mounted | labels | keys | encrypted]
 	automounter mlist [mounted | llinks | dlinks]
