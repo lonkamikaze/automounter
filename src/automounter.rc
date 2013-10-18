@@ -14,7 +14,7 @@
 : ${automounter_enable="No"}
 
 name="automounter"
-rcvar=`set_rcvar`
+rcvar="automounter_enable"
 
 pidfile="%%RUN%%/automounter.amd.pid"
 procname="%%AMD:1%%"
