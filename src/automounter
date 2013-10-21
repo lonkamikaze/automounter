@@ -1141,8 +1141,8 @@ list() {
 	if [ -z "$1" -o "$1" = "mounted" ]; then
 		for line in $(
 			# Format: <device>;<label>
-			/sbin/mount | /usr/bin/grep -F " $(realpath $mountdir)" | \
-				/usr/bin/sed -E "s,$devfs/(.+) on $(realpath $mountdir)/(.*) \(.*,\1;\2,1"
+			/sbin/mount | /usr/bin/grep -F " $(realpath $mountdir 2>&3)" | \
+				/usr/bin/sed -E "s,$devfs/(.+) on $(realpath $mountdir 2>&3)/(.*) \(.*,\1;\2,1"
 		); {
 			# If the given devices match a line just print
 			# it and we are done. Otherwise look for the label
@@ -1152,9 +1152,9 @@ list() {
 			# because fuse creates a new device node for each
 			# device it mounts.
 			device="${line%%;*}"
-			if /usr/bin/grep -qFx "$line" "$nodes"; then
+			if /usr/bin/grep -qFx "$line" "$nodes" 2>&3; then
 				echo "mounted: <${line#*;}> [$device]"
-			elif line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"; then
+			elif line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes" 2>&3)"; then
 				if [ "${line#*;}" != "$device" ]; then
 					echo "mounted: <${line#*;}> [${line%%;*}] as [$device]"
 				else
@@ -1217,16 +1217,16 @@ mlist() {
 	if [ -z "$1" -o "$1" = "mounted" ]; then
 		for line in $(
 			# Format: <device>;<label>
-			/sbin/mount | /usr/bin/grep -F " $(realpath $mountdir)" | \
+			/sbin/mount | /usr/bin/grep -F " $(realpath $mountdir 2>&3)" | \
 				/usr/bin/sed -E "s,$devfs/(.+) on $mountdir/(.*) \(.*,\1;\2,1"
 		); {
 			# If the given devices match a line just print
 			# it and we are done. Otherwise look for the label
 			# with a different device, which can happen with
 			# fuse devices.
-			if /usr/bin/grep -qFx "$line" "$nodes"; then
+			if /usr/bin/grep -qFx "$line" "$nodes" 2>&3; then
 				echo "$mountdir/${line#*;}"
-			elif $(line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes")"); then
+			elif $(line="$(/usr/bin/grep -E ";${line#*;}$" "$nodes" 2>&3)"); then
 				device="${line%%;*}"
 				echo "$mountdir/${line#*;}"
 			fi
