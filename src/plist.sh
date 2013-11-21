@@ -1,6 +1,11 @@
 #!/bin/sh -f
 
-prefix=
-rmPrefix=/
+. install.inc
 
-. list.sh
+for file in $files; {
+	test -z "$file" && continue
+	target="${file##*,}"
+	target="${target#$prefix/}"
+	echo "$target"
+}
+
