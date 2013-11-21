@@ -1,3 +1,10 @@
+automounter-1.5 (21 November 2013):
+  - Add top-like monitor
+  - Fix rc script if the amd(8) call is defined with arguments
+  - Make the rc script FreeBSD 10 compatible
+  - Add destdir (staging) support to the installer
+  - Pretty print urlencoded labels like those produced by FreeBSD-10
+
 automounter-1.4.7 (29 August 2013):
   - Allow configuring additional arguments for tool calls
   - Add read-only fallback for mounts to support mounting devices with
