@@ -9,7 +9,7 @@ automounter.conf.5,0644,%%MAN%%/man5/automounter.conf.5.gz
 
 for parameter; {
 	case "${parameter%%=*}" in
-	-prefix | -tmp | -var | -run | -vartmp | -media | -devfs | \
+	-destdir | -prefix | -tmp | -var | -run | -vartmp | -media | -devfs | \
 	-map | -amd | -amq | -rpcbind | -rpcinfo | -logger | \
 	-geli_images | -geli_keys)
 		value="${parameter#*=}"
@@ -27,6 +27,7 @@ for parameter; {
 	esac
 }
 
+: ${destdir=}
 : ${prefix=/usr/local}
 : ${tmp=/tmp}
 : ${var=/var}
@@ -42,6 +43,9 @@ for parameter; {
 : ${logger=/usr/bin/logger -st automounter}
 : ${geli_images=$var/geli/images}
 : ${geli_keys=.geli/keys}
+
+# If set, destdir should end with a /
+destdir=${destdir%/}${destdir:+/}
 
 replace="
 %%PREFIX%%,$prefix

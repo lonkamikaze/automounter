@@ -4,8 +4,8 @@
 
 for file in $files; {
 	test -z "$file" && continue
-	target="${file##*,}"
-	target="${target#$rmPrefix}"
+	file="${file##*,}"
+	target="${destdir}${file#${destdir:+/}}"
 	echo "$target"
 }
 
