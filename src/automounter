@@ -213,6 +213,46 @@ readonly EX_TEMPFAIL=75
 exec 3> "$devfs/null"
 
 #
+# URL decode, used to make prettier labels under FreeBSD 10.
+#
+# Does not support "+" decoding.
+#
+# @param @
+#	The strings to decode, if not given stdin is decoded
+#
+urldecode() {
+	if [ $# -gt 0 ]; then
+		echo "$@" | urldecode
+		return
+	fi
+	awk '
+	# Create a character symbol table
+	BEGIN {
+		i = -1;
+		while (++i < 256) {
+			chars[sprintf("%%%02X", i)] = i
+			chars[sprintf("%%%02x", i)] = i
+		}
+	}
+	
+	# Replace urlencoded characters
+	{
+		i = 1
+		while (i <= length($0)) {
+			char = substr($0, i, 3);
+			if (char in chars) {
+				printf("%c", chars[char])
+				i += 3
+			} else {
+				printf("%.1s", char)
+				i++
+			}
+		}
+		printf(ORS)
+	}'
+}
+
+#
 # Produces a list of geom device nodes on stdout.
 #
 # Only outputs leaf nodes that are not mounted.
@@ -271,7 +311,7 @@ geomLabels() {
 #		[<label> <device>]*
 #
 rmLinks() {
-	local mode label device type
+	local mode label pretty device type
 
 	mode="$1"
 	shift
@@ -280,6 +320,7 @@ rmLinks() {
 		label="$1"
 		device="$2"
 		type="${label%%/*}"
+		pretty="$(urldecode "$label")"
 
 		# Prepare for the next iteration.
 		shift 2
@@ -288,8 +329,9 @@ rmLinks() {
 		/sbin/umount -f "$(realpath $mountdir)/$label" >&3 2>&3
 
 		# Remove the stale label.
-		echo "$mode: remove <$label> [$device]" | eval $logger
-		/bin/rm "$linkdir/$label"
+		echo "$mode: remove <$pretty> [$device]" | eval $logger
+		/bin/rm "$linkdir/$pretty"
+		/bin/rm "$linkdir/$label" 2>&3 # Pre 1.5 style links
 		/bin/rm "$linkdir/${devfs##*/}/$device.$type"
 		/bin/rm "$linkdir/${devfs##*/}/$device"
 		/bin/rmdir "$linkdir/${devfs##*/}" 2>&3
@@ -307,18 +349,19 @@ rmLinks() {
 #		[<label> <device>]*
 #
 createLinks() {
-	local label device type
+	local label pretty device type
 
 	while [ -n "$1" ]; do
 		label="$1"
 		device="$2"
 		type="${label%%/*}"
+		pretty="$(urldecode "$label")"
 
 		# Prepare for the next iteration.
 		shift 2
 		
 		# Create mount hooks.
-		echo "update: add <$label> [$device]" | eval $logger
+		echo "update: add <$pretty> [$device]" | eval $logger
 		/bin/mkdir -p "$mountdir/$label"
 
 		# Inherit mount node owner from device.
@@ -339,7 +382,7 @@ createLinks() {
 		# Create the links that invoke amd.
 		/bin/mkdir -p "$linkdir/$type"
 		/bin/mkdir -p "$linkdir/${devfs##*/}"
-		/bin/ln -s "$directory/$hash" "$linkdir/$label"
+		/bin/ln -s "$directory/$hash" "$linkdir/$pretty"
 		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device.$type"
 		/bin/ln -s "$directory/$hash" "$linkdir/${devfs##*/}/$device"
 	done
@@ -357,11 +400,12 @@ createLinks() {
 #	The device the geli provider is available as.
 #
 geliUnmount() {
-	local line label name device
+	local line label pretty name device
 	label="$1"
 	name="$2"
 	device="$3"
 	line="$name;$device;$label"
+	pretty="$(urldecode "$label")"
 	# Attempt to detach until successful or until the
 	# key has returned.
 	while true; do
@@ -392,7 +436,7 @@ geliUnmount() {
 		2)
 			# Detach succeeded.
 			echo "geli: remove provider <$name> [$device]" \
-				"with key from <$label>" | eval $logger
+				"with key from <$pretty>" | eval $logger
 			break
 			;;
 		esac
@@ -925,7 +969,7 @@ geliUpdate() {
 	# Do not run if geli features are not activated.
 	test "$geli" != "1" && return 0
 
-	local oldkeys keys key label name line device
+	local oldkeys keys key label pretty name line device
 
 	# Clean up keys from stale mounts.
 	/usr/bin/touch "$oldnodes"
@@ -936,10 +980,11 @@ geliUpdate() {
 		/usr/bin/grep -qFx "$line" "$nodes" && continue
 		label="${line##*;}"
 		label="${label%;*}"
+		pretty="$(urldecode "$label")"
 
 		# Forget keys belonging to this line.
 		for key in $(echo "$keys" | /usr/bin/grep -E "^$label;"); do
-			echo "geli: remove key <${key##*;}> from <$label>" | eval $logger
+			echo "geli: remove key <${key##*;}> from <$pretty>" | eval $logger
 		done
 		keys="$(echo "$keys" | /usr/bin/grep -Ev "^$label;")"
 	done
@@ -951,10 +996,11 @@ geliUpdate() {
 		/usr/bin/grep -qFx "$line" "$oldnodes" && continue
 		label="${line#*;}"
 		device="${line%%;*}"
+		pretty="$(urldecode "$label")"
 
 		if probeMount "${label%%/*}" "$device"; then
 			for key in $(/bin/ls "$probe/$geli_keys/" 2>&3); do
-				echo "geli: add key <$key> from <$label>" | eval $logger
+				echo "geli: add key <$key> from <$pretty>" | eval $logger
 				echo "$label;$key" >> "$geli_availablekeys"
 			done
 
@@ -992,6 +1038,7 @@ geliUpdate() {
 	for key in $(/bin/cat "$geli_availablekeys"); do
 		label="${key%;*}"
 		name="${key##*;}"
+		pretty="$(urldecode "$label")"
 
 		# The image with this name is already available as an md device.
 		/usr/bin/grep -qE "^$name;" "$geli_nodes" && continue
@@ -1018,14 +1065,13 @@ geliUpdate() {
 				/bin/sleep 0.1
 			done
 		fi
-
 		# Attempt to attach (decrypt) file.
 		if cd "$(/usr/bin/dirname "$key")" \
 			&& /sbin/geli attach -p -k "$key" "$device"
 		then
 			# Remember success.
 			echo "geli: add provider" \
-			     "<$name> [$device] with key from <$label>" \
+			     "<$name> [$device] with key from <$pretty>" \
 			     | eval $logger
 			echo "$name;$device;$label" >> "$geli_nodes"
 		else
@@ -1162,19 +1208,19 @@ list() {
 				fi
 			fi
 		}
-	fi
+	fi | urldecode
 
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "labels" ]; then
 		/usr/bin/sed -E 's/([^;]*);(.*)/label: <\2> [\1]/1' \
 			"$nodes" 2>&3
-	fi
+	fi | urldecode
 
 	# List the keys that have been found on mounted devices.
 	if [ -z "$1" -o "$1" = "keys" ]; then
 		/usr/bin/sed -E 's/(.*);(.*)/key: <\2> from <\1>/1' \
 			"$geli_availablekeys" 2>&3
-	fi
+	fi | urldecode
 
 	# List the encrypted providers and their status.
 	if [ -z "$1" -o "$1" = "encrypted" -o "$1" = "images" ]; then
@@ -1191,7 +1237,7 @@ list() {
 				echo "encrypted provider: <$image> [$device]"
 			fi
 		done
-	fi
+	fi | urldecode
 
 	return 0
 }
@@ -1236,7 +1282,7 @@ mlist() {
 	# Print the labels that are available for mounting.
 	if [ -z "$1" -o "$1" = "llinks" ]; then
 		/usr/bin/sed "s,[^;]*;,$linkdir/," "$nodes" 2>&3
-	fi
+	fi | urldecode
 
 	# Print the devices that are available for mounting.
 	if [ -z "$1" -o "$1" = "dlinks" ]; then
@@ -1313,7 +1359,7 @@ mount() {
 #	otherwise "exec /sbin/umount" is called.
 #
 umount() {
-	local label device labels status
+	local label pretty device labels status
 
 	# Find the label for the current hash.
 	label=
@@ -1360,8 +1406,9 @@ umount() {
 
 	# If the device is missing (i.e. it was removed while being mounted),
 	# force umount.
+	pretty="$(urldecode "$label")"
 	if [ ! -e "$devfs/$device" ]; then
-		echo  "umount: force umount missing <$label> [$device]" | eval $logger
+		echo  "umount: force umount missing <$pretty> [$device]" | eval $logger
 		# Schedule an update.
 		/sbin/umount -f "$(realpath $mountdir)/$label" 2>&3
 		status=$?
@@ -1676,7 +1723,7 @@ monitor() {
 	monitorFormats
 
 	# Local variables.
-	local list label device mounts
+	local list label pretty device mounts
 	local dir mount mode keys nkeys key
 	local gnodes image encrypted
 
@@ -1709,6 +1756,7 @@ monitor() {
 		&& for label in $list; do
 			device="${label%%;*}"
 			label="${label#*;}"
+			pretty="$(urldecode "$label")"
 
 			# Get the number of keys.
 			nkeys=$(($(echo "$keys" | /usr/bin/grep -F "$label;" | /usr/bin/wc -l)))
@@ -1720,7 +1768,7 @@ monitor() {
 			&& mode=rw
 			echo $mount | /usr/bin/grep -qF ', read-only' && mode=ro
 
-			monitorListRow $label $device $nkeys $mode || break
+			monitorListRow $pretty $device $nkeys $mode || break
 		done
 		# Calculate the number of labels.
 		list=${list:+$(($(echo "$list" | /usr/bin/wc -l)))}
@@ -1745,10 +1793,10 @@ monitor() {
 		test -n "$keys" \
 		&& monitorListHeading KEY ORIGIN \
 		&& for key in $keys; do
-			device=${key%%;*}
+			pretty=$(urldecode "${key%%;*}")
 			key=${key#*;}
 
-			monitorListRow $key $device || break
+			monitorListRow $key $pretty || break
 		done
 		# Calculate the number of available keys.
 		keys=${keys:+$(($(echo "$keys" | /usr/bin/wc -l)))}
