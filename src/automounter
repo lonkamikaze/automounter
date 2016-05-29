@@ -1,6 +1,6 @@
 #!/bin/sh -f
 #
-# Copyright (c) 2008 - 2013
+# Copyright (c) 2008 - 2016
 # Dominic Fandrey <kamikaze@bsdforen.de>
 #
 # Redistribution and use in source and binary forms, with or without
@@ -1108,7 +1108,7 @@ start() {
 		# Start amd with a copy of the static map
 		/bin/cp "$static_map" "$map"
 		eval $logger start: Starting amd ...
-		if ! eval $amd -rp -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
+		if ! eval $amd -p -a "$a" ${c:+-c "$c"} ${w:+-w "$w"} \
 		          ${l:+-l"$l"} "$directory" "$map" > "$pidfile"; then
 			eval $logger start: failed.
 			return $ERR_AMD_FAIL
